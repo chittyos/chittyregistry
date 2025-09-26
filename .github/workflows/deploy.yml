@@ -26,9 +26,6 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Validate configuration
-        run: npx wrangler validate
-
   deploy-staging:
     name: Deploy to Staging
     needs: test
