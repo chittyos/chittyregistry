@@ -1,6 +1,6 @@
 // ChittyRegistry Cloudflare Workers Configuration
 {
-  "name": "chittyregistry-production",
+  "name": "chittyregistry",
   "main": "src/universal-registry-worker.js",
   "compatibility_date": "2025-03-07",
   "compatibility_flags": ["nodejs_compat"],
