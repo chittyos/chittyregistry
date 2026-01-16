@@ -4,7 +4,6 @@ compatibility_date = "2024-01-01"
 account_id = "0bc21e3a5a9de1a4cc843be9c3e98121"
 
 [env.staging]
-name = "chittyregistry-staging"
 main = "src/universal-registry-worker.js"
 vars = { SERVICE_NAME = "chittyregistry-universal-staging", SERVICE_VERSION = "2.0.0-staging", CHITTYOS_ENVIRONMENT = "staging", REGISTRY_BASE_PATH = "/Users/nb/.claude/projects/-", CHITTYCHAT_INTEGRATION = "enabled" }
 
@@ -17,7 +16,6 @@ binding = "REGISTRY_STORE"
 id = "b4518a6db20640ea990099f6e8497771"
 
 [env.production]
-name = "chittyregistry-production"
 main = "src/universal-registry-worker.js"
 vars = { SERVICE_NAME = "chittyregistry-universal", SERVICE_VERSION = "2.0.0", CHITTYOS_ENVIRONMENT = "production", REGISTRY_BASE_PATH = "/Users/nb/.claude/projects/-", CHITTYCHAT_INTEGRATION = "enabled" }
 
