@@ -45,3 +45,7 @@ id = "58649f33726646d8b8c44befd4140947"
 [[kv_namespaces]]
 binding = "REGISTRY_STORE"
 id = "b4518a6db20640ea990099f6e8497771"
+
+# ChittyTrack observability
+[[tail_consumers]]
+service = "chittytrack"
