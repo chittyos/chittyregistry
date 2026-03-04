@@ -295,11 +295,19 @@ export default {
 
       // GET /v0.1/servers — list all MCP servers
       if (path === "/v0.1/servers" && request.method === "GET") {
-        const limit = parseInt(url.searchParams.get("limit") || "30");
+        const defaultLimit = 30;
+        const maxLimit = 100;
+        const rawLimit = parseInt(url.searchParams.get("limit") || `${defaultLimit}`, 10);
+        const limit = Number.isFinite(rawLimit) && rawLimit > 0
+          ? Math.min(rawLimit, maxLimit)
+          : defaultLimit;
         const cursor = url.searchParams.get("cursor");
 
         const allServers = await getAllMcpServers(env);
-        const startIdx = cursor ? parseInt(cursor) : 0;
+        const rawCursor = cursor ? parseInt(cursor, 10) : 0;
+        const startIdx = Number.isFinite(rawCursor) && rawCursor >= 0
+          ? Math.min(rawCursor, allServers.length)
+          : 0;
         const page = allServers.slice(startIdx, startIdx + limit);
         const nextCursor = startIdx + limit < allServers.length ? String(startIdx + limit) : null;
 
@@ -341,7 +349,26 @@ export default {
 
       // POST /v0.1/servers — register a new MCP server (auth required)
       if (path === "/v0.1/servers" && request.method === "POST") {
-        const serverData = await request.json();
+        const adminToken = env.MCP_REGISTRY_ADMIN_TOKEN;
+        const authHeader = request.headers.get("Authorization") || "";
+        const bearerToken = authHeader.startsWith("Bearer ")
+          ? authHeader.slice(7).trim()
+          : "";
+
+        if (!adminToken || bearerToken !== adminToken) {
+          return jsonResponse(
+            { error: "Unauthorized registry mutation" },
+            401,
+            corsHeaders,
+          );
+        }
+
+        let serverData;
+        try {
+          serverData = await request.json();
+        } catch {
+          return jsonResponse({ error: "Invalid JSON body" }, 400, corsHeaders);
+        }
 
         if (!serverData.name || !serverData.description || !serverData.version) {
           return jsonResponse(
@@ -353,6 +380,14 @@ export default {
 
         serverData._publishedAt = serverData._publishedAt || new Date().toISOString();
         serverData._updatedAt = new Date().toISOString();
+
+        if (!env.REGISTRY_STORE || typeof env.REGISTRY_STORE.put !== "function") {
+          return jsonResponse(
+            { error: "Registry store unavailable. Please try again later." },
+            503,
+            corsHeaders,
+          );
+        }
 
         const kvKey = `mcp-servers:${serverData.name}:${serverData.version}`;
         await env.REGISTRY_STORE.put(kvKey, JSON.stringify(serverData));
@@ -712,22 +747,35 @@ function getMcpServerSeed() {
 
 async function getAllMcpServers(env) {
   const seed = getMcpServerSeed();
+  const seedNames = new Set(seed.map((s) => s.name));
 
   // Merge with any KV-stored servers
   const kvList = await env.REGISTRY_STORE?.list({ prefix: "mcp-servers:" });
   if (kvList?.keys?.length) {
-    for (const key of kvList.keys) {
-      const raw = await env.REGISTRY_STORE.get(key.name);
-      if (raw) {
-        try {
-          const server = JSON.parse(raw);
-          // Only add if not already in seed (by name)
-          if (!seed.find((s) => s.name === server.name)) {
-            seed.push(server);
-          }
-        } catch (_) {
-          // skip malformed entries
+    const raws = await Promise.all(kvList.keys.map((key) => env.REGISTRY_STORE.get(key.name)));
+    for (const raw of raws) {
+      if (!raw) continue;
+      try {
+        const server = JSON.parse(raw);
+        if (
+          !server ||
+          typeof server.name !== "string" ||
+          typeof server.description !== "string" ||
+          typeof server.version !== "string"
+        ) {
+          continue;
         }
+
+        // Seed entries are canonical; avoid overriding them with custom variants.
+        if (seedNames.has(server.name)) {
+          continue;
+        }
+
+        if (!seed.find((s) => s.name === server.name && s.version === server.version)) {
+          seed.push(server);
+        }
+      } catch (_) {
+        // skip malformed entries
       }
     }
   }
@@ -767,15 +815,23 @@ function parseMcpServerPath(path) {
   const prefix = "/v0.1/servers/";
   if (!path.startsWith(prefix)) return null;
 
+  const safeDecode = (value) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+
   const rest = path.slice(prefix.length);
   // rest = "cc.chitty/chittymcp/versions/latest" or "cc.chitty/chittymcp"
   const versionsIdx = rest.indexOf("/versions/");
   if (versionsIdx === -1) {
-    return { name: rest, version: null };
+    return { name: safeDecode(rest), version: null };
   }
 
-  const name = rest.slice(0, versionsIdx);
-  const version = rest.slice(versionsIdx + "/versions/".length);
+  const name = safeDecode(rest.slice(0, versionsIdx));
+  const version = safeDecode(rest.slice(versionsIdx + "/versions/".length));
   return { name, version };
 }
 
@@ -786,9 +842,9 @@ function renderAllowedListHtml(servers) {
   const renderRow = (s) => {
     let install = "";
     if (s.remotes?.length) {
-      install = `<code>${s.remotes[0].url}</code>`;
+      install = `<code>${escapeHtml(s.remotes[0].url || "")}</code>`;
     } else if (s.packages?.length) {
-      install = `<code>npx ${s.packages[0].name}</code>`;
+      install = `<code>npx ${escapeHtml(s.packages[0].name || "")}</code>`;
     }
     return `<tr>
       <td><strong>${escapeHtml(s.name)}</strong></td>
@@ -832,5 +888,10 @@ function renderAllowedListHtml(servers) {
 }
 
 function escapeHtml(str) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
