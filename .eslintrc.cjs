@@ -25,7 +25,7 @@ module.exports = {
     'prefer-const': 'error',
     '@typescript-eslint/ban-types': 'warn',
   },
-  ignorePatterns: ['dist/', 'node_modules/', 'logs/', 'packages/cli/dist/'],
+  ignorePatterns: ['dist/', 'node_modules/', 'logs/', 'packages/', 'scripts/', 'jest.setup.ts'],
   overrides: [
     {
       files: ['**/*.js'],
