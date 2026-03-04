@@ -290,6 +290,91 @@ export default {
       }
 
       // ============================================
+      // MCP REGISTRY v0.1 ENDPOINTS
+      // ============================================
+
+      // GET /v0.1/servers — list all MCP servers
+      if (path === "/v0.1/servers" && request.method === "GET") {
+        const limit = parseInt(url.searchParams.get("limit") || "30");
+        const cursor = url.searchParams.get("cursor");
+
+        const allServers = await getAllMcpServers(env);
+        const startIdx = cursor ? parseInt(cursor) : 0;
+        const page = allServers.slice(startIdx, startIdx + limit);
+        const nextCursor = startIdx + limit < allServers.length ? String(startIdx + limit) : null;
+
+        return jsonResponse(
+          {
+            servers: page.map(formatMcpRegistryEntry),
+            metadata: { count: allServers.length, nextCursor },
+          },
+          200,
+          corsHeaders,
+        );
+      }
+
+      // GET /v0.1/servers/:name/versions/:version — specific or latest version
+      if (path.startsWith("/v0.1/servers/") && request.method === "GET") {
+        const parsed = parseMcpServerPath(path);
+        if (!parsed || !parsed.name) {
+          return jsonResponse({ error: "Invalid server path" }, 400, corsHeaders);
+        }
+
+        const allServers = await getAllMcpServers(env);
+        const server = allServers.find((s) => s.name === parsed.name);
+
+        if (!server) {
+          return jsonResponse({ error: "Server not found", name: parsed.name }, 404, corsHeaders);
+        }
+
+        // If version specified and not "latest", check it matches
+        if (parsed.version && parsed.version !== "latest" && parsed.version !== server.version) {
+          return jsonResponse(
+            { error: "Version not found", name: parsed.name, version: parsed.version },
+            404,
+            corsHeaders,
+          );
+        }
+
+        return jsonResponse(formatMcpRegistryEntry(server), 200, corsHeaders);
+      }
+
+      // POST /v0.1/servers — register a new MCP server (auth required)
+      if (path === "/v0.1/servers" && request.method === "POST") {
+        const serverData = await request.json();
+
+        if (!serverData.name || !serverData.description || !serverData.version) {
+          return jsonResponse(
+            { error: "name, description, and version are required" },
+            400,
+            corsHeaders,
+          );
+        }
+
+        serverData._publishedAt = serverData._publishedAt || new Date().toISOString();
+        serverData._updatedAt = new Date().toISOString();
+
+        const kvKey = `mcp-servers:${serverData.name}:${serverData.version}`;
+        await env.REGISTRY_STORE.put(kvKey, JSON.stringify(serverData));
+
+        return jsonResponse(
+          { success: true, server: formatMcpRegistryEntry(serverData) },
+          201,
+          corsHeaders,
+        );
+      }
+
+      // GET /allowed-list — human-readable HTML page
+      if (path === "/allowed-list" && request.method === "GET") {
+        const allServers = await getAllMcpServers(env);
+        const html = renderAllowedListHtml(allServers);
+        return new Response(html, {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8", ...corsHeaders },
+        });
+      }
+
+      // ============================================
       // NOT FOUND
       // ============================================
 
@@ -306,6 +391,11 @@ export default {
             "GET /api/v1/tools",
             "POST /api/v1/chittychat/recommendations",
             "POST /api/v1/sync",
+            "GET /v0.1/servers",
+            "GET /v0.1/servers/:name/versions/latest",
+            "GET /v0.1/servers/:name/versions/:version",
+            "POST /v0.1/servers",
+            "GET /allowed-list",
           ],
         },
         404,
@@ -509,4 +599,238 @@ async function getAvailableCommands(env) {
     { name: "registry", description: "Access universal registry" },
     { name: "health", description: "Check system health" },
   ];
+}
+
+// ============================================
+// MCP REGISTRY v0.1
+// ============================================
+
+function getMcpServerSeed() {
+  const now = "2026-03-03T00:00:00Z";
+  return [
+    {
+      name: "cc.chitty/chittymcp",
+      description: "ChittyOS MCP Gateway — MemoryCloude, credentials, Notion, Neon, ecosystem",
+      version: "2.0.0",
+      websiteUrl: "https://chitty.cc",
+      repository: { url: "https://github.com/CHITTYOS/chittymcp", source: "github" },
+      remotes: [{ transportType: "streamable-http", url: "https://mcp.chitty.cc/mcp" }],
+      _internal: true,
+      _publishedAt: now,
+      _updatedAt: now,
+    },
+    {
+      name: "cc.chitty/chittyevidence-search",
+      description: "ChittyEvidence AI semantic search over case documents and evidence",
+      version: "1.0.0",
+      websiteUrl: "https://chitty.cc",
+      repository: { url: "https://github.com/CHITTYOS/chittyevidence", source: "github" },
+      remotes: [{ transportType: "streamable-http", url: "https://autorag.mcp.cloudflare.com/mcp" }],
+      _internal: true,
+      _publishedAt: now,
+      _updatedAt: now,
+    },
+    {
+      name: "cc.chitty/chittymac",
+      description: "Apple-native data MCP — Contacts, Calendar, Notes, Reminders, Mail access",
+      version: "1.0.0",
+      websiteUrl: "https://chitty.cc",
+      repository: { url: "https://github.com/CHITTYOS/chittymac", source: "github" },
+      packages: [{ registryName: "npm", name: "chittymac", version: "1.0.0" }],
+      _internal: true,
+      _publishedAt: now,
+      _updatedAt: now,
+    },
+    {
+      name: "cc.chitty/neon",
+      description: "Neon PostgreSQL management — database operations, branching, migrations",
+      version: "1.0.0",
+      websiteUrl: "https://neon.tech",
+      repository: { url: "https://github.com/neondatabase/mcp-server-neon", source: "github" },
+      packages: [{ registryName: "npm", name: "@neondatabase/mcp-server-neon", version: "latest" }],
+      _internal: true,
+      _publishedAt: now,
+      _updatedAt: now,
+    },
+    {
+      name: "com.github/github-mcp-server",
+      description: "GitHub integration — repos, issues, PRs, actions, code search",
+      version: "1.0.0",
+      websiteUrl: "https://github.com",
+      repository: { url: "https://github.com/anthropics/github-mcp-server", source: "github" },
+      packages: [{ registryName: "npm", name: "@anthropic-ai/github-mcp-server", version: "latest" }],
+      _internal: false,
+      _publishedAt: now,
+      _updatedAt: now,
+    },
+    {
+      name: "com.notion/notion-mcp-server",
+      description: "Notion workspace integration — pages, databases, search, comments",
+      version: "1.0.0",
+      websiteUrl: "https://notion.so",
+      repository: { url: "https://github.com/makenotion/notion-mcp-server", source: "github" },
+      packages: [{ registryName: "npm", name: "@notionhq/notion-mcp-server", version: "latest" }],
+      _internal: false,
+      _publishedAt: now,
+      _updatedAt: now,
+    },
+    {
+      name: "com.stripe/stripe-agent-toolkit",
+      description: "Stripe payments integration — customers, invoices, subscriptions, refunds",
+      version: "1.0.0",
+      websiteUrl: "https://stripe.com",
+      repository: { url: "https://github.com/stripe/agent-toolkit", source: "github" },
+      packages: [{ registryName: "npm", name: "@stripe/agent-toolkit", version: "latest" }],
+      _internal: false,
+      _publishedAt: now,
+      _updatedAt: now,
+    },
+    {
+      name: "com.cloudflare/mcp-server-cloudflare",
+      description: "Cloudflare developer platform — Workers, KV, R2, D1, Hyperdrive",
+      version: "1.0.0",
+      websiteUrl: "https://developers.cloudflare.com",
+      repository: { url: "https://github.com/cloudflare/mcp-server-cloudflare", source: "github" },
+      packages: [{ registryName: "npm", name: "@cloudflare/mcp-server-cloudflare", version: "latest" }],
+      _internal: false,
+      _publishedAt: now,
+      _updatedAt: now,
+    },
+    {
+      name: "io.modelcontextprotocol/filesystem",
+      description: "Local filesystem access — read, write, search, and manage files",
+      version: "1.0.0",
+      websiteUrl: "https://modelcontextprotocol.io",
+      repository: { url: "https://github.com/modelcontextprotocol/servers", source: "github" },
+      packages: [{ registryName: "npm", name: "@modelcontextprotocol/server-filesystem", version: "latest" }],
+      _internal: false,
+      _publishedAt: now,
+      _updatedAt: now,
+    },
+  ];
+}
+
+async function getAllMcpServers(env) {
+  const seed = getMcpServerSeed();
+
+  // Merge with any KV-stored servers
+  const kvList = await env.REGISTRY_STORE?.list({ prefix: "mcp-servers:" });
+  if (kvList?.keys?.length) {
+    for (const key of kvList.keys) {
+      const raw = await env.REGISTRY_STORE.get(key.name);
+      if (raw) {
+        try {
+          const server = JSON.parse(raw);
+          // Only add if not already in seed (by name)
+          if (!seed.find((s) => s.name === server.name)) {
+            seed.push(server);
+          }
+        } catch (_) {
+          // skip malformed entries
+        }
+      }
+    }
+  }
+
+  return seed;
+}
+
+function formatMcpRegistryEntry(serverDef) {
+  const entry = {
+    server: {
+      $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+      name: serverDef.name,
+      description: serverDef.description,
+      version: serverDef.version,
+    },
+    _meta: {
+      "io.modelcontextprotocol.registry/official": {
+        status: "active",
+        publishedAt: serverDef._publishedAt || new Date().toISOString(),
+        updatedAt: serverDef._updatedAt || new Date().toISOString(),
+        isLatest: true,
+      },
+    },
+  };
+
+  if (serverDef.websiteUrl) entry.server.websiteUrl = serverDef.websiteUrl;
+  if (serverDef.repository) entry.server.repository = serverDef.repository;
+  if (serverDef.remotes) entry.server.remotes = serverDef.remotes;
+  if (serverDef.packages) entry.server.packages = serverDef.packages;
+
+  return entry;
+}
+
+function parseMcpServerPath(path) {
+  // Paths like /v0.1/servers/cc.chitty/chittymcp/versions/latest
+  // or /v0.1/servers/cc.chitty/chittymcp/versions/2.0.0
+  const prefix = "/v0.1/servers/";
+  if (!path.startsWith(prefix)) return null;
+
+  const rest = path.slice(prefix.length);
+  // rest = "cc.chitty/chittymcp/versions/latest" or "cc.chitty/chittymcp"
+  const versionsIdx = rest.indexOf("/versions/");
+  if (versionsIdx === -1) {
+    return { name: rest, version: null };
+  }
+
+  const name = rest.slice(0, versionsIdx);
+  const version = rest.slice(versionsIdx + "/versions/".length);
+  return { name, version };
+}
+
+function renderAllowedListHtml(servers) {
+  const internal = servers.filter((s) => s._internal);
+  const external = servers.filter((s) => !s._internal);
+
+  const renderRow = (s) => {
+    let install = "";
+    if (s.remotes?.length) {
+      install = `<code>${s.remotes[0].url}</code>`;
+    } else if (s.packages?.length) {
+      install = `<code>npx ${s.packages[0].name}</code>`;
+    }
+    return `<tr>
+      <td><strong>${escapeHtml(s.name)}</strong></td>
+      <td>${escapeHtml(s.description)}</td>
+      <td>${install}</td>
+    </tr>`;
+  };
+
+  const tableHead = `<thead><tr><th>Name</th><th>Description</th><th>Install / URL</th></tr></thead>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChittyRegistry — Approved MCP Servers</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { border-bottom: 2px solid #0066cc; padding-bottom: 0.5rem; }
+    h2 { margin-top: 2rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; }
+    th { background: #f5f5f5; }
+    code { background: #f0f0f0; padding: 0.15rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+    .meta { color: #666; font-size: 0.9em; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>ChittyRegistry — Approved MCP Servers</h1>
+  <p>MCP servers approved for use in the ChittyOS ecosystem. Configure <code>https://registry.chitty.cc</code> as your MCP Registry URL.</p>
+
+  <h2>Internal (ChittyOS)</h2>
+  <table>${tableHead}<tbody>${internal.map(renderRow).join("")}</tbody></table>
+
+  <h2>External (Vetted Third-Party)</h2>
+  <table>${tableHead}<tbody>${external.map(renderRow).join("")}</tbody></table>
+
+  <p class="meta">Served by ChittyRegistry v2.0.0 &middot; ${servers.length} servers &middot; ${new Date().toISOString()}</p>
+</body>
+</html>`;
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
