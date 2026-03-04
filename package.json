@@ -8,6 +8,7 @@
     "deploy": "npx wrangler deploy",
     "deploy:staging": "npx wrangler deploy --env staging",
     "deploy:production": "npx wrangler deploy --env production",
+    "lint": "eslint . --ext .js,.ts --max-warnings 0",
     "test": "echo \"Tests passed - production deployment ready\"",
     "validate": "npx wrangler validate",
     "tail": "npx wrangler tail"
