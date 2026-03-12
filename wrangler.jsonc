@@ -41,6 +41,13 @@
     }
   ],
 
+  // ChittyTrack observability
+  "tail_consumers": [
+    {
+      "service": "chittytrack"
+    }
+  ],
+
   // Staging environment
   "env": {
     "staging": {
