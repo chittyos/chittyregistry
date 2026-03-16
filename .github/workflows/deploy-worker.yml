@@ -32,13 +32,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install wrangler
-        run: npm install wrangler --no-save
+        run: npm install --prefix /tmp/wrangler-cli wrangler
 
       - name: Validate wrangler configuration
-        run: npx wrangler deploy --dry-run --outdir=./dist
+        run: /tmp/wrangler-cli/node_modules/.bin/wrangler deploy --dry-run --outdir=./dist
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
@@ -61,13 +60,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install wrangler
-        run: npm install wrangler --no-save
+        run: npm install --prefix /tmp/wrangler-cli wrangler
 
       - name: Deploy to Cloudflare Workers (Staging)
-        run: npx wrangler deploy
+        run: /tmp/wrangler-cli/node_modules/.bin/wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -78,17 +76,6 @@ jobs:
           response=$(curl -s https://chittyregistry-staging.chitty.workers.dev/health)
           echo "Health check response: $response"
           echo "$response" | jq -e '.status == "HEALTHY"'
-
-      - name: Comment on commit
-        uses: actions/github-script@v8
-        with:
-          script: |
-            github.rest.repos.createCommitComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: '✅ Deployed to staging: https://chittyregistry-staging.chitty.workers.dev'
-            })
 
   deploy-production:
     name: Deploy to Production
@@ -106,13 +93,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install wrangler
-        run: npm install wrangler --no-save
+        run: npm install --prefix /tmp/wrangler-cli wrangler
 
       - name: Deploy to Cloudflare Workers (Production)
-        run: npx wrangler deploy
+        run: /tmp/wrangler-cli/node_modules/.bin/wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -128,22 +114,6 @@ jobs:
         run: |
           response=$(curl -s -H "Host: registry.chitty.cc" https://registry.chitty.cc/health)
           echo "$response" | jq -e '.service == "chittyregistry-universal"'
-
-      - name: Create deployment tag
-        run: |
-          git tag -a "deploy-$(date +%Y%m%d-%H%M%S)" -m "Production deployment"
-          git push origin --tags
-
-      - name: Notify deployment success
-        uses: actions/github-script@v8
-        with:
-          script: |
-            github.rest.repos.createCommitComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: '🚀 Deployed to production: https://registry.chitty.cc\n\nVersion: 2.0.0\nDeployment: chittyregistry-production'
-            })
 
   rollback:
     name: Rollback on Failure
