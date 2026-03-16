@@ -48,25 +48,5 @@
     }
   ],
 
-  // Staging environment
-  "env": {
-    "staging": {
-      "name": "chittyregistry-staging",
-      "vars": {
-        "SERVICE_NAME": "chittyregistry-universal-staging",
-        "SERVICE_VERSION": "2.0.0-staging",
-        "CHITTYOS_ENVIRONMENT": "staging"
-      },
-      "kv_namespaces": [
-        {
-          "binding": "REGISTRY_CACHE",
-          "id": "58649f33726646d8b8c44befd4140947"
-        },
-        {
-          "binding": "REGISTRY_STORE",
-          "id": "b4518a6db20640ea990099f6e8497771"
-        }
-      ]
-    }
-  }
+  "workers_dev": false
 }
