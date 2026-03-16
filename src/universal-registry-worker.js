@@ -742,6 +742,28 @@ function getMcpServerSeed() {
       _publishedAt: now,
       _updatedAt: now,
     },
+    {
+      name: "cc.chitty/chittyagent-ship",
+      description: "Development wrap-up agent — preflight checks, AI brainstorm, context checkpoint, branch management",
+      version: "1.0.0",
+      websiteUrl: "https://ship.chitty.cc",
+      repository: { url: "https://github.com/CHITTYOS/chittyagent", source: "github" },
+      remotes: [{ transportType: "streamable-http", url: "https://ship.chitty.cc/mcp" }],
+      _internal: true,
+      _publishedAt: "2026-03-16T18:30:00Z",
+      _updatedAt: "2026-03-16T18:30:00Z",
+    },
+    {
+      name: "cc.chitty/chittyagent-notes",
+      description: "Apple Notes MCP agent — sync, search, RAG-powered semantic retrieval over notes",
+      version: "1.0.0",
+      websiteUrl: "https://notes.chitty.cc",
+      repository: { url: "https://github.com/CHITTYOS/chittyagent", source: "github" },
+      remotes: [{ transportType: "streamable-http", url: "https://notes.chitty.cc/mcp" }],
+      _internal: true,
+      _publishedAt: "2026-03-16T18:30:00Z",
+      _updatedAt: "2026-03-16T18:30:00Z",
+    },
   ];
 }
 
