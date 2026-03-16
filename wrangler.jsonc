@@ -2,7 +2,7 @@
 {
   "name": "chittyregistry",
   "main": "src/universal-registry-worker.js",
-  "compatibility_date": "2025-03-07",
+  "compatibility_date": "2026-03-16",
   "compatibility_flags": ["nodejs_compat"],
   "account_id": "0bc21e3a5a9de1a4cc843be9c3e98121",
 
@@ -38,6 +38,13 @@
     {
       "pattern": "registry.chitty.cc/*",
       "zone_name": "chitty.cc"
+    }
+  ],
+
+  // ChittyTrack observability
+  "tail_consumers": [
+    {
+      "service": "chittytrack"
     }
   ],
 
