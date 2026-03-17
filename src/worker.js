@@ -29,7 +29,7 @@ export default {
     // Health check endpoint
     if (path === '/health' || path === '/') {
       return new Response(JSON.stringify({
-        status: 'HEALTHY',
+        status: 'ok',
         service: 'chittyregistry',
         version: '1.0.0',
         timestamp: new Date().toISOString(),

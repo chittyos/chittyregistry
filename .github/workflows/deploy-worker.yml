@@ -75,7 +75,7 @@ jobs:
           sleep 5
           response=$(curl -s https://chittyregistry-staging.chitty.workers.dev/health)
           echo "Health check response: $response"
-          echo "$response" | jq -e '.status == "HEALTHY"'
+          echo "$response" | jq -e '.status == "ok"'
 
   deploy-production:
     name: Deploy to Production
@@ -108,7 +108,7 @@ jobs:
           sleep 5
           response=$(curl -s https://registry.chitty.cc/health)
           echo "Health check response: $response"
-          echo "$response" | jq -e '.status == "HEALTHY"'
+          echo "$response" | jq -e '.status == "ok"'
 
       - name: Verify route configuration
         run: |

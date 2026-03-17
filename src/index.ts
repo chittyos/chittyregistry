@@ -124,7 +124,7 @@ class ChittyRegistry {
         const monitoringStats = this.healthMonitor.getMonitoringStats();
 
         res.json({
-          status: 'HEALTHY',
+          status: 'ok',
           service: config.serviceName,
           version: config.serviceVersion,
           timestamp: new Date().toISOString(),
@@ -140,7 +140,7 @@ class ChittyRegistry {
       } catch (error) {
         logger.error('Health check failed', { error: error.message });
         res.status(503).json({
-          status: 'UNHEALTHY',
+          status: 'error',
           service: config.serviceName,
           version: config.serviceVersion,
           timestamp: new Date().toISOString(),
