@@ -45,7 +45,7 @@ export default {
         const stats = await getRegistryStats(env);
         return jsonResponse(
           {
-            status: "HEALTHY",
+            status: "ok",
             service: "chittyregistry-universal",
             version: "2.0.0",
             timestamp: new Date().toISOString(),
