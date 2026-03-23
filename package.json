@@ -40,7 +40,7 @@
     "ts-jest": "^29.4.6",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.1.6",
-    "wrangler": "^4.75.0"
+    "wrangler": "^4.76.0"
   },
   "keywords": [
     "chittyos",
