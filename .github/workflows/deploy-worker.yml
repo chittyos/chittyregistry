@@ -122,7 +122,7 @@ jobs:
     if: failure()
     steps:
       - name: Notify rollback required
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             github.rest.repos.createCommitComment({
