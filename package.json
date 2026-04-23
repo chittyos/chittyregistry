@@ -39,7 +39,7 @@
     "jest": "^30.3.0",
     "ts-jest": "^29.4.6",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.1.6",
+    "typescript": "^6.0.3",
     "wrangler": "^4.78.0"
   },
   "keywords": [
