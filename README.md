@@ -1,3 +1,6 @@
+![ChittyOS](https://img.shields.io/badge/ChittyOS-service-6366F1?style=flat-square)
+![Tier](https://img.shields.io/badge/tier-2%20platform-4338CA?style=flat-square)
+
 # ChittyRegistry Universal System
 
 **ChittyRegistry** is a universal tool and script registry for the ChittyOS ecosystem, providing service discovery, intelligent search, and AI-driven recommendations.
