@@ -27,13 +27,20 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // Authentication check for write operations
+    // Authentication check for write operations.
+    // Substring "chitty" was a placeholder gate — replaced with an equality check against
+    // the Register-issued service token. ChittyRegister is the Gatekeeper; only it (or an
+    // operator with the admin token) may write to the Registry catalog.
     const requiresAuth = request.method !== "GET";
     if (requiresAuth) {
       const authHeader =
         request.headers.get("Authorization") ||
-        request.headers.get("X-ChittyID-Token");
-      if (!authHeader || !authHeader.includes("chitty")) {
+        request.headers.get("X-ChittyID-Token") ||
+        "";
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+      const expected = env.CHITTY_REGISTRY_SERVICE_TOKEN || env.CHITTY_REGISTRY_ADMIN_TOKEN;
+      const isLegacyAccepted = !expected && token && token.includes("chitty"); // boot-only fallback
+      if (!token || (expected && token !== expected && token !== env.CHITTY_REGISTRY_ADMIN_TOKEN) || (!expected && !isLegacyAccepted)) {
         return jsonResponse(
           { error: "Authentication required", code: "AUTH_REQUIRED" },
           401,
@@ -598,15 +605,29 @@ async function getCategories(env) {
 }
 
 // KV layout:
-//   tools:index           → JSON array of chitty_id strings (manifest of all registered)
-//   tools:item:<chitty_id> → JSON of full registration record
+//   tools:item:<chitty_id>                 → JSON of full registration record (source of truth)
 //   tools:by-subtype:<subtype>:<chitty_id> → "1" marker for filtering
 //
+// We list `tools:item:` directly on read instead of maintaining a separate `tools:index`
+// array — that array was a read-modify-write hotspot and Cloudflare KV has no CAS, so
+// concurrent registrations could lose entries.
+//
 // @canon: chittycanon://gov/governance#core-types
-async function getTools(env, category) {
+async function listAllToolIds(env) {
+  if (!env.REGISTRY_STORE?.list) return [];
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.REGISTRY_STORE.list({ prefix: "tools:item:", cursor });
+    for (const key of page.keys) out.push(key.name.slice("tools:item:".length));
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return out;
+}
+
+async function getTools(env, subtype) {
   if (!env.REGISTRY_STORE) return [];
-  const indexRaw = await env.REGISTRY_STORE.get("tools:index");
-  const ids = indexRaw ? JSON.parse(indexRaw) : [];
+  const ids = await listAllToolIds(env);
   if (ids.length === 0) return [];
   const items = await Promise.all(
     ids.map(async (id) => {
@@ -615,10 +636,9 @@ async function getTools(env, category) {
     }),
   );
   const filtered = items.filter(Boolean);
-  if (!category) return filtered;
-  return filtered.filter(
-    (t) => t.subtype === category || t.category === category || t.entity_type === category,
-  );
+  if (!subtype) return filtered;
+  // Filter strictly by subtype. entity_type filtering is a separate query param.
+  return filtered.filter((t) => t.subtype === subtype);
 }
 
 async function getTool(env, toolId) {
@@ -662,19 +682,15 @@ async function registerTool(env, toolData) {
     health: "unknown",
   };
 
-  // Update index (idempotent).
-  const indexRaw = await env.REGISTRY_STORE.get("tools:index");
-  const ids = indexRaw ? JSON.parse(indexRaw) : [];
-  if (!ids.includes(chittyId)) ids.push(chittyId);
-
+  // Source of truth = tools:item:<id>. No central index — we list on read. This is
+  // race-free because each write is to its own key.
   await Promise.all([
     env.REGISTRY_STORE.put(`tools:item:${chittyId}`, JSON.stringify(record)),
     env.REGISTRY_STORE.put(`tools:by-subtype:${subtype}:${chittyId}`, "1"),
-    env.REGISTRY_STORE.put("tools:index", JSON.stringify(ids)),
   ]);
 
-  // Invalidate stats cache.
-  await env.REGISTRY_CACHE?.delete("stats").catch(() => {});
+  // Invalidate stats cache (optional-chain fix: don't call .catch on undefined).
+  try { await env.REGISTRY_CACHE?.delete("stats"); } catch { /* cache misses are fine */ }
 
   return record;
 }
@@ -741,7 +757,7 @@ async function runHealthSweep(env) {
       }).catch(() => {});
     }
   }
-  await env.REGISTRY_CACHE?.delete("stats").catch(() => {});
+  try { await env.REGISTRY_CACHE?.delete("stats"); } catch { /* cache misses are fine */ }
   return { swept_at: new Date().toISOString(), count: results.length, results };
 }
 
