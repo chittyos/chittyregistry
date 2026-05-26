@@ -3,6 +3,12 @@
 // Provides REST API for the universal tool/script registry
 
 export default {
+  // Scheduled cron entrypoint — sweeps health of every registered service.
+  // Configure in wrangler.jsonc: { "triggers": { "crons": ["0 */6 * * *"] } }
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runHealthSweep(env).catch((e) => console.error("health sweep failed:", e.message)));
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -156,8 +162,24 @@ export default {
 
       if (path === "/api/v1/tools" && request.method === "POST") {
         const toolData = await request.json();
-        const result = await registerTool(env, toolData);
-        return jsonResponse({ success: true, tool: result }, 201, corsHeaders);
+        try {
+          const result = await registerTool(env, toolData);
+          return jsonResponse({ success: true, tool: result }, 201, corsHeaders);
+        } catch (e) {
+          return jsonResponse({ success: false, error: e.message }, 400, corsHeaders);
+        }
+      }
+
+      // Signed catalog snapshot — self-healing clients pull this for sync.
+      if (path === "/api/v1/manifest" && request.method === "GET") {
+        const manifest = await getCatalogManifest(env);
+        return jsonResponse({ success: true, manifest }, 200, corsHeaders);
+      }
+
+      // Manual trigger for the health sweep (cron also runs this on schedule).
+      if (path === "/api/v1/health-check" && request.method === "POST") {
+        const summary = await runHealthSweep(env);
+        return jsonResponse({ success: true, summary }, 200, corsHeaders);
       }
 
       const toolMatch = path.match(/^\/api\/v1\/tools\/(.+)$/);
@@ -575,19 +597,166 @@ async function getCategories(env) {
   };
 }
 
+// KV layout:
+//   tools:index           → JSON array of chitty_id strings (manifest of all registered)
+//   tools:item:<chitty_id> → JSON of full registration record
+//   tools:by-subtype:<subtype>:<chitty_id> → "1" marker for filtering
+//
+// @canon: chittycanon://gov/governance#core-types
 async function getTools(env, category) {
-  // Return tools from specific category
-  return [];
+  if (!env.REGISTRY_STORE) return [];
+  const indexRaw = await env.REGISTRY_STORE.get("tools:index");
+  const ids = indexRaw ? JSON.parse(indexRaw) : [];
+  if (ids.length === 0) return [];
+  const items = await Promise.all(
+    ids.map(async (id) => {
+      const raw = await env.REGISTRY_STORE.get(`tools:item:${id}`);
+      return raw ? JSON.parse(raw) : null;
+    }),
+  );
+  const filtered = items.filter(Boolean);
+  if (!category) return filtered;
+  return filtered.filter(
+    (t) => t.subtype === category || t.category === category || t.entity_type === category,
+  );
 }
 
 async function getTool(env, toolId) {
-  // Get specific tool by ID
-  return null;
+  if (!env.REGISTRY_STORE) return null;
+  const raw = await env.REGISTRY_STORE.get(`tools:item:${toolId}`);
+  return raw ? JSON.parse(raw) : null;
 }
 
+const VALID_ENTITY_TYPES = ["P", "L", "T", "E", "A"];
+
 async function registerTool(env, toolData) {
-  // Register new tool in registry
-  return toolData;
+  if (!env.REGISTRY_STORE) {
+    throw new Error("REGISTRY_STORE KV binding missing");
+  }
+  // Accept Register's payload shape: { chitty_id, entity_type, subtype, name, description, version, endpoints, certificate_ref }
+  const chittyId = toolData.chitty_id || toolData.id;
+  if (!chittyId) throw new Error("chitty_id required");
+  if (!toolData.name) throw new Error("name required");
+
+  // @canon: chittycanon://gov/governance#core-types — all 5 entity types supported.
+  const entityType = toolData.entity_type || "T";
+  if (!VALID_ENTITY_TYPES.includes(entityType)) {
+    throw new Error(`entity_type must be one of P/L/T/E/A (got '${entityType}')`);
+  }
+  const subtype = toolData.subtype || "service";
+
+  const record = {
+    chitty_id: chittyId,
+    entity_type: entityType,
+    subtype,
+    name: toolData.name,
+    description: toolData.description || "",
+    version: toolData.version || "0.0.0",
+    endpoints: toolData.endpoints || [],
+    certificate_ref: toolData.certificate_ref || null,
+    metadata: toolData.metadata || {},
+    registered_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    status: "active",
+    last_health_check: null,
+    health: "unknown",
+  };
+
+  // Update index (idempotent).
+  const indexRaw = await env.REGISTRY_STORE.get("tools:index");
+  const ids = indexRaw ? JSON.parse(indexRaw) : [];
+  if (!ids.includes(chittyId)) ids.push(chittyId);
+
+  await Promise.all([
+    env.REGISTRY_STORE.put(`tools:item:${chittyId}`, JSON.stringify(record)),
+    env.REGISTRY_STORE.put(`tools:by-subtype:${subtype}:${chittyId}`, "1"),
+    env.REGISTRY_STORE.put("tools:index", JSON.stringify(ids)),
+  ]);
+
+  // Invalidate stats cache.
+  await env.REGISTRY_CACHE?.delete("stats").catch(() => {});
+
+  return record;
+}
+
+// Signed snapshot of the whole catalog — clients pull this to sync.
+async function getCatalogManifest(env) {
+  const tools = await getTools(env, null);
+  const manifest = {
+    version: "1.0.0",
+    generated_at: new Date().toISOString(),
+    count: tools.length,
+    entries: tools.map((t) => ({
+      chitty_id: t.chitty_id,
+      entity_type: t.entity_type,
+      subtype: t.subtype,
+      name: t.name,
+      version: t.version,
+      health: t.health,
+      last_health_check: t.last_health_check,
+      updated_at: t.updated_at,
+    })),
+  };
+  // Content-addressable digest (clients can verify they have the latest snapshot).
+  const body = new TextEncoder().encode(JSON.stringify(manifest.entries));
+  const digest = await crypto.subtle.digest("SHA-256", body);
+  manifest.content_hash = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return manifest;
+}
+
+// Scheduled re-validation: ping each registered service's /health, mark stale.
+async function runHealthSweep(env) {
+  const tools = await getTools(env, null);
+  const results = [];
+  for (const tool of tools) {
+    if (tool.entity_type !== "T") continue;
+    if (!["service", "mcp-server"].includes(tool.subtype)) continue;
+    const healthUrl = pickHealthUrl(tool);
+    if (!healthUrl) continue;
+    let health = "unknown";
+    let error = null;
+    try {
+      const resp = await fetch(healthUrl, { method: "GET", signal: AbortSignal.timeout(5000) });
+      health = resp.ok ? "healthy" : "unhealthy";
+      if (!resp.ok) error = `HTTP ${resp.status}`;
+    } catch (e) {
+      health = "unreachable";
+      error = e.message;
+    }
+    const updated = { ...tool, health, last_health_check: new Date().toISOString(), last_health_error: error };
+    await env.REGISTRY_STORE.put(`tools:item:${tool.chitty_id}`, JSON.stringify(updated));
+    results.push({ chitty_id: tool.chitty_id, health, error });
+
+    // Notify Discovery of stale services.
+    if (health !== "healthy" && env.CHITTY_DISCOVERY_SERVICE_TOKEN) {
+      fetch(`https://discovery.chitty.cc/api/v1/services/stale`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.CHITTY_DISCOVERY_SERVICE_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ chitty_id: tool.chitty_id, reason: health, error }),
+      }).catch(() => {});
+    }
+  }
+  await env.REGISTRY_CACHE?.delete("stats").catch(() => {});
+  return { swept_at: new Date().toISOString(), count: results.length, results };
+}
+
+function pickHealthUrl(tool) {
+  // Prefer explicit health endpoint, else derive from first endpoint's host.
+  if (!Array.isArray(tool.endpoints) || tool.endpoints.length === 0) return null;
+  const explicit = tool.endpoints.find((e) => typeof e === "string" && e.endsWith("/health"));
+  if (explicit) {
+    try { new URL(explicit); return explicit; } catch { /* path-only — need a base */ }
+  }
+  const anyFullUrl = tool.endpoints.find((e) => { try { new URL(e); return true; } catch { return false; } });
+  if (anyFullUrl) {
+    try { const u = new URL(anyFullUrl); return `${u.origin}/health`; } catch { return null; }
+  }
+  return null;
 }
 
 async function getChittyChatRecommendations(env, context) {
@@ -763,6 +932,28 @@ function getMcpServerSeed() {
       _internal: true,
       _publishedAt: "2026-03-16T18:30:00Z",
       _updatedAt: "2026-03-16T18:30:00Z",
+    },
+    {
+      name: "cc.chitty/chittyagent-gam",
+      description: "ChittyAgent GAM — Multi-account Google Workspace admin proxy via GAMADV-XTD3 tunnel. User, group, alias, org, and domain management across Google Workspace accounts.",
+      version: "1.0.0",
+      websiteUrl: "https://gam.agent.chitty.cc",
+      repository: { url: "https://github.com/CHITTYOS/chittyentity", source: "github" },
+      remotes: [{ transportType: "streamable-http", url: "https://gam.agent.chitty.cc/agent/message" }],
+      _internal: true,
+      _publishedAt: "2026-04-06T00:00:00Z",
+      _updatedAt: "2026-04-06T00:00:00Z",
+    },
+    {
+      name: "cc.chitty/chittyagent-neon",
+      description: "ChittyAgent Neon — Neon PostgreSQL API proxy for ubiquitous MCP access. Project listing, SQL execution, branch management, connection strings, and schema introspection.",
+      version: "1.0.0",
+      websiteUrl: "https://neon.agent.chitty.cc",
+      repository: { url: "https://github.com/CHITTYOS/chittyentity", source: "github" },
+      remotes: [{ transportType: "streamable-http", url: "https://neon.agent.chitty.cc/agent/message" }],
+      _internal: true,
+      _publishedAt: "2026-04-06T00:00:00Z",
+      _updatedAt: "2026-04-06T00:00:00Z",
     },
   ];
 }
