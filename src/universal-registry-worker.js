@@ -27,10 +27,15 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // Authentication check for write operations.
-    // Substring "chitty" was a placeholder gate — replaced with an equality check against
-    // the Register-issued service token. ChittyRegister is the Gatekeeper; only it (or an
-    // operator with the admin token) may write to the Registry catalog.
+    // Registry is READ-ONLY for clients. Only ChittyRegister (the Gatekeeper) writes here.
+    // All discovery is over GET — the catalog is populated exclusively by validated,
+    // authorized, registered submissions that came through Register.
+    //
+    // Writes are restricted to:
+    //   1. The Register-issued service token (CHITTY_REGISTRY_SERVICE_TOKEN)
+    //   2. An admin token (CHITTY_REGISTRY_ADMIN_TOKEN)
+    //   3. A high-trust service managing its own children (delegated catalog mgmt —
+    //      verified per-request via the delegated-management endpoint, not here).
     const requiresAuth = request.method !== "GET";
     if (requiresAuth) {
       const authHeader =
@@ -39,10 +44,16 @@ export default {
         "";
       const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
       const expected = env.CHITTY_REGISTRY_SERVICE_TOKEN || env.CHITTY_REGISTRY_ADMIN_TOKEN;
-      const isLegacyAccepted = !expected && token && token.includes("chitty"); // boot-only fallback
-      if (!token || (expected && token !== expected && token !== env.CHITTY_REGISTRY_ADMIN_TOKEN) || (!expected && !isLegacyAccepted)) {
+      // Boot-only legacy fallback (substring 'chitty') ONLY when no secret is configured.
+      const isLegacyAccepted = !expected && token && token.includes("chitty");
+      const isFirstParty = token && (token === env.CHITTY_REGISTRY_SERVICE_TOKEN || token === env.CHITTY_REGISTRY_ADMIN_TOKEN);
+      if (!token || (expected && !isFirstParty) || (!expected && !isLegacyAccepted)) {
         return jsonResponse(
-          { error: "Authentication required", code: "AUTH_REQUIRED" },
+          {
+            error: "Registry is read-only for clients. Submit registrations to https://register.chitty.cc/api/v1/register; the Gatekeeper propagates here.",
+            code: "READ_ONLY",
+            submission_endpoint: "https://register.chitty.cc/api/v1/register",
+          },
           401,
           corsHeaders,
         );
@@ -61,10 +72,42 @@ export default {
             status: "ok",
             service: "chittyregistry-universal",
             version: "2.0.0",
+            tier: 2,
+            role: "Directory — read-only catalog of certified entries. Submit registrations to https://register.chitty.cc.",
+            submission_endpoint: "https://register.chitty.cc/api/v1/register",
+            register_vs_registry: "register (verb, gatekeeper) ≠ registry (noun, directory). You're at the directory; submit at the gatekeeper.",
+            canonical_uri: "chittycanon://core/services/chitty-registry",
             timestamp: new Date().toISOString(),
             deployment: "cloudflare-workers",
             uptime: Date.now(),
             stats: stats,
+          },
+          200,
+          corsHeaders,
+        );
+      }
+
+      // Machine-readable: what this Registry is, and where to submit.
+      if (path === "/api/v1/about" && request.method === "GET") {
+        return jsonResponse(
+          {
+            service: "chittyregistry",
+            canonical_uri: "chittycanon://core/services/chitty-registry",
+            tier: 2,
+            role: "directory",
+            read_only_for_clients: true,
+            submission_endpoint: "https://register.chitty.cc/api/v1/register",
+            register_vs_registry_primer: "Register (verb, Tier 1 Gatekeeper) validates + mints. Registry (noun, Tier 2 Directory, this service) catalogs. Discovery (Tier 3) resolves runtime endpoints.",
+            sibling_services: {
+              register: "https://register.chitty.cc",
+              discovery: "https://discovery.chitty.cc",
+              schema: "https://schema.chitty.cc",
+            },
+            delegated_management_protocol: {
+              enabled: true,
+              path: "/api/v1/managed-by/{parent_chitty_id}",
+              description: "Services with compliance_score + trust_score >= threshold may register sub-entries (plugins, skills, MCPs) owned by them. Verification happens via Register, not here.",
+            },
           },
           200,
           corsHeaders,
@@ -199,6 +242,17 @@ export default {
         }
 
         return jsonResponse({ success: true, tool }, 200, corsHeaders);
+      }
+
+      // Delegated management discovery: list children of a parent service.
+      const managedByMatch = path.match(/^\/api\/v1\/managed-by\/(.+)$/);
+      if (managedByMatch && request.method === "GET") {
+        const parentId = decodeURIComponent(managedByMatch[1]);
+        const all = await getTools(env, null);
+        const children = all.filter(
+          (t) => t.metadata?.parent_chitty_id === parentId || t.parent_chitty_id === parentId,
+        );
+        return jsonResponse({ success: true, parent_chitty_id: parentId, count: children.length, children }, 200, corsHeaders);
       }
 
       // ============================================
@@ -665,6 +719,11 @@ async function registerTool(env, toolData) {
   }
   const subtype = toolData.subtype || "service";
 
+  // Parent linkage for delegated catalog management (high-trust services managing
+  // their own children — plugins, skills, MCPs they own). The Gatekeeper sets
+  // parent_chitty_id when forwarding a delegated submission. Registry just stores it.
+  const parentChittyId = toolData.parent_chitty_id || toolData.metadata?.parent_chitty_id || null;
+
   const record = {
     chitty_id: chittyId,
     entity_type: entityType,
@@ -674,7 +733,10 @@ async function registerTool(env, toolData) {
     version: toolData.version || "0.0.0",
     endpoints: toolData.endpoints || [],
     certificate_ref: toolData.certificate_ref || null,
-    metadata: toolData.metadata || {},
+    parent_chitty_id: parentChittyId,
+    metadata: { ...(toolData.metadata || {}), ...(parentChittyId ? { parent_chitty_id: parentChittyId } : {}) },
+    compliance_score: toolData.compliance_score ?? null,
+    trust_score: toolData.trust_score ?? null,
     registered_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     status: "active",
@@ -684,10 +746,12 @@ async function registerTool(env, toolData) {
 
   // Source of truth = tools:item:<id>. No central index — we list on read. This is
   // race-free because each write is to its own key.
-  await Promise.all([
+  const writes = [
     env.REGISTRY_STORE.put(`tools:item:${chittyId}`, JSON.stringify(record)),
     env.REGISTRY_STORE.put(`tools:by-subtype:${subtype}:${chittyId}`, "1"),
-  ]);
+  ];
+  if (parentChittyId) writes.push(env.REGISTRY_STORE.put(`tools:by-parent:${parentChittyId}:${chittyId}`, "1"));
+  await Promise.all(writes);
 
   // Invalidate stats cache (optional-chain fix: don't call .catch on undefined).
   try { await env.REGISTRY_CACHE?.delete("stats"); } catch { /* cache misses are fine */ }
