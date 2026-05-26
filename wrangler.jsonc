@@ -48,9 +48,9 @@
     }
   ],
 
-  // Self-healing health sweep — every 6 hours, re-validate each registered service.
+  // Self-healing health sweep — every 15 minutes, re-validate each registered service.
   "triggers": {
-    "crons": ["0 */6 * * *"]
+    "crons": ["*/15 * * * *"]
   },
 
   "workers_dev": false
