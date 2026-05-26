@@ -28,35 +28,38 @@ export default {
     }
 
     // Registry is READ-ONLY for clients. Only ChittyRegister (the Gatekeeper) writes here.
-    // All discovery is over GET — the catalog is populated exclusively by validated,
-    // authorized, registered submissions that came through Register.
     //
-    // Writes are restricted to:
-    //   1. The Register-issued service token (CHITTY_REGISTRY_SERVICE_TOKEN)
-    //   2. An admin token (CHITTY_REGISTRY_ADMIN_TOKEN)
-    //   3. A high-trust service managing its own children (delegated catalog mgmt —
-    //      verified per-request via the delegated-management endpoint, not here).
+    // Write access path (any one suffices):
+    //   1. Cloudflare service binding from chittyregister (request has no CF-Connecting-IP
+    //      AND carries X-Chitty-Internal-Binding: chittyregister). Bypasses token check.
+    //   2. Register-issued service token CHITTY_REGISTRY_SERVICE_TOKEN.
+    //   3. Admin token CHITTY_REGISTRY_ADMIN_TOKEN.
     const requiresAuth = request.method !== "GET";
     if (requiresAuth) {
-      const authHeader =
-        request.headers.get("Authorization") ||
-        request.headers.get("X-ChittyID-Token") ||
-        "";
-      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
-      const expected = env.CHITTY_REGISTRY_SERVICE_TOKEN || env.CHITTY_REGISTRY_ADMIN_TOKEN;
-      // Boot-only legacy fallback (substring 'chitty') ONLY when no secret is configured.
-      const isLegacyAccepted = !expected && token && token.includes("chitty");
-      const isFirstParty = token && (token === env.CHITTY_REGISTRY_SERVICE_TOKEN || token === env.CHITTY_REGISTRY_ADMIN_TOKEN);
-      if (!token || (expected && !isFirstParty) || (!expected && !isLegacyAccepted)) {
-        return jsonResponse(
-          {
-            error: "Registry is read-only for clients. Submit registrations to https://register.chitty.cc/api/v1/register; the Gatekeeper propagates here.",
-            code: "READ_ONLY",
-            submission_endpoint: "https://register.chitty.cc/api/v1/register",
-          },
-          401,
-          corsHeaders,
-        );
+      const isServiceBinding =
+        !request.headers.get("CF-Connecting-IP") &&
+        request.headers.get("X-Chitty-Internal-Binding") === "chittyregister";
+
+      if (!isServiceBinding) {
+        const authHeader =
+          request.headers.get("Authorization") ||
+          request.headers.get("X-ChittyID-Token") ||
+          "";
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+        const expected = env.CHITTY_REGISTRY_SERVICE_TOKEN || env.CHITTY_REGISTRY_ADMIN_TOKEN;
+        const isLegacyAccepted = !expected && token && token.includes("chitty");
+        const isFirstParty = token && (token === env.CHITTY_REGISTRY_SERVICE_TOKEN || token === env.CHITTY_REGISTRY_ADMIN_TOKEN);
+        if (!token || (expected && !isFirstParty) || (!expected && !isLegacyAccepted)) {
+          return jsonResponse(
+            {
+              error: "Registry is read-only for clients. Submit registrations to https://register.chitty.cc/api/v1/register; the Gatekeeper propagates here.",
+              code: "READ_ONLY",
+              submission_endpoint: "https://register.chitty.cc/api/v1/register",
+            },
+            401,
+            corsHeaders,
+          );
+        }
       }
     }
 
