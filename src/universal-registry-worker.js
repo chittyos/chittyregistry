@@ -41,15 +41,20 @@ export default {
         request.headers.get("X-Chitty-Internal-Binding") === "chittyregister";
 
       if (!isServiceBinding) {
+        // External HTTP writes require exact equality with the configured token. The
+        // legacy substring fallback ('chitty' in token) is removed — service bindings
+        // are the canonical path for first-party writes, and any external write requires
+        // the operator to provision the secret intentionally.
         const authHeader =
           request.headers.get("Authorization") ||
           request.headers.get("X-ChittyID-Token") ||
           "";
         const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
-        const expected = env.CHITTY_REGISTRY_SERVICE_TOKEN || env.CHITTY_REGISTRY_ADMIN_TOKEN;
-        const isLegacyAccepted = !expected && token && token.includes("chitty");
-        const isFirstParty = token && (token === env.CHITTY_REGISTRY_SERVICE_TOKEN || token === env.CHITTY_REGISTRY_ADMIN_TOKEN);
-        if (!token || (expected && !isFirstParty) || (!expected && !isLegacyAccepted)) {
+        const isFirstParty = token && (
+          (env.CHITTY_REGISTRY_SERVICE_TOKEN && token === env.CHITTY_REGISTRY_SERVICE_TOKEN) ||
+          (env.CHITTY_REGISTRY_ADMIN_TOKEN && token === env.CHITTY_REGISTRY_ADMIN_TOKEN)
+        );
+        if (!isFirstParty) {
           return jsonResponse(
             {
               error: "Registry is read-only for clients. Submit registrations to https://register.chitty.cc/api/v1/register; the Gatekeeper propagates here.",
