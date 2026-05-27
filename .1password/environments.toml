@@ -1,0 +1,9 @@
+# 1Password Environment configuration for chittyregistry
+# Secrets loaded via OP_SERVICE_ACCOUNT_TOKEN (sa-github-cicd)
+#
+# op:// references used by this service:
+#   op://ChittyOS-Deployment/cloudflare-deploy-token/credential
+#   op://ChittyOS-Deployment/cloudflare-deploy-token/account_id
+#   op://ChittyOS/chittyregistry-prod/service_token
+
+mount_paths = []
