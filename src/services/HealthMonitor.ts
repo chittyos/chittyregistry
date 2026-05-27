@@ -112,6 +112,19 @@ export class HealthMonitor {
   private async checkServiceHealth(service: Service): Promise<HealthStatus> {
     const startTime = Date.now();
 
+    // F-007: short-circuit self-check — CF Worker cannot fetch itself via public URL (loopback HTTP 522).
+    // If this is the registry itself, return healthy directly (we are running, ergo we are healthy).
+    if (service.serviceName === chittyregistry || service.baseUrl?.includes(registry.chitty.cc)) {
+      return {
+        serviceName: service.serviceName,
+        status: healthy,
+        responseTime: 0,
+        lastChecked: new Date().toISOString(),
+        statusCode: 200,
+        note: self-check short-circuited per F-007 / SOP-051
+      } as HealthStatus;
+    }
+
     try {
       const healthUrl = `${service.baseUrl}${service.healthCheck?.path || '/health'}`;
       const method = service.healthCheck?.method || 'GET';
