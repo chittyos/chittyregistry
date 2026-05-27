@@ -325,6 +325,32 @@ export default {
       // ============================================
 
       if (path === "/api/v1/sync" && request.method === "POST") {
+        // /api/v1/sync is a MAINTENANCE trigger — it tells the worker to rescan
+        // R2 + Cloudflare for live services. It does NOT ingest a posted catalog.
+        // Registry is read-only for clients; service registrations flow through
+        // chittyregister (the Gatekeeper) at register.chitty.cc/api/v1/register
+        // and propagate here via service binding. Reject non-empty bodies with
+        // an explicit redirect so misdirected callers fail fast instead of
+        // silently dropping their payload (chittyregistry#68).
+        const contentLength = parseInt(request.headers.get("Content-Length") || "0", 10);
+        if (contentLength > 0) {
+          return jsonResponse(
+            {
+              error:
+                "POST /api/v1/sync does not ingest a catalog. It only triggers an R2/Cloudflare rescan. To register one or more services, submit them to chittyregister at https://register.chitty.cc/api/v1/register; the Gatekeeper propagates accepted services to this registry. Re-issue this request with an empty body to trigger a rescan.",
+              code: "WRONG_ENDPOINT",
+              submission_endpoint: "https://register.chitty.cc/api/v1/register",
+              rescan_usage: {
+                method: "POST",
+                url: "https://registry.chitty.cc/api/v1/sync",
+                body: "(empty)",
+                auth: "Bearer <CHITTY_REGISTRY_SERVICE_TOKEN>",
+              },
+            },
+            400,
+            corsHeaders,
+          );
+        }
         const syncResult = await triggerRegistryScan(env);
         return jsonResponse(
           {
@@ -332,6 +358,8 @@ export default {
             message: "Registry scan triggered",
             syncId: syncResult.id,
             estimatedCompletion: syncResult.estimatedCompletion,
+            note:
+              "This endpoint rescans R2/Cloudflare. To register services, POST to https://register.chitty.cc/api/v1/register.",
           },
           202,
           corsHeaders,
