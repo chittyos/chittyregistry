@@ -13,7 +13,7 @@ export function validateBody<T>(schema: ZodSchema<T>) {
       const result = schema.safeParse(req.body);
 
       if (!result.success) {
-        const errors = result.error.errors.map(err => ({
+        const errors = result.error.issues.map(err => ({
           field: err.path.join('.'),
           message: err.message,
           code: err.code
@@ -56,7 +56,7 @@ export function validateQuery<T>(schema: ZodSchema<T>) {
       const result = schema.safeParse(req.query);
 
       if (!result.success) {
-        const errors = result.error.errors.map(err => ({
+        const errors = result.error.issues.map(err => ({
           field: err.path.join('.'),
           message: err.message,
           code: err.code
@@ -76,8 +76,14 @@ export function validateQuery<T>(schema: ZodSchema<T>) {
         return;
       }
 
-      // Replace query with validated data
-      req.query = result.data as any;
+      // Replace query with validated data. Express 5 makes req.query a
+      // read-only getter, so redefine the property instead of assigning.
+      Object.defineProperty(req, 'query', {
+        value: result.data,
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
       next();
 
     } catch (error) {
@@ -99,7 +105,7 @@ export function validateParams<T>(schema: ZodSchema<T>) {
       const result = schema.safeParse(req.params);
 
       if (!result.success) {
-        const errors = result.error.errors.map(err => ({
+        const errors = result.error.issues.map(err => ({
           field: err.path.join('.'),
           message: err.message,
           code: err.code
@@ -137,7 +143,7 @@ export function validateParams<T>(schema: ZodSchema<T>) {
  */
 export function handleValidationError(error: any, req: Request, res: Response, next: NextFunction): void {
   if (error instanceof ZodError) {
-    const errors = error.errors.map(err => ({
+    const errors = error.issues.map(err => ({
       field: err.path.join('.'),
       message: err.message,
       code: err.code

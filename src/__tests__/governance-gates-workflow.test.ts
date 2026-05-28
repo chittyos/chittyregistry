@@ -89,10 +89,14 @@ describe('governance-gates.yml workflow configuration', () => {
     });
 
     test('workflow has exactly one job defined (gates)', () => {
-      // Count top-level job entries by looking for lines indented by 2 spaces followed by a word and colon
-      const jobMatches = content.match(/^  \w[\w-]*:\s*$/gm);
+      // Isolate the jobs: block (everything from `jobs:` to the next
+      // top-level, non-indented key) so we don't accidentally count
+      // indented keys belonging to other sections such as `on:`.
+      const jobsBlock = content.replace(/^[\s\S]*?^jobs:\s*$/m, '').replace(/^\S[\s\S]*$/m, '');
+      const jobMatches = jobsBlock.match(/^  \w[\w-]*:\s*$/gm);
       expect(jobMatches).not.toBeNull();
       expect(jobMatches!.length).toBe(1);
+      expect(jobMatches![0].trim()).toBe('gates:');
     });
   });
 });

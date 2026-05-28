@@ -10,7 +10,6 @@ module.exports = {
       'ts-jest',
       {
         tsconfig: 'tsconfig.json',
-        transpilation: true,
       },
     ],
   },
