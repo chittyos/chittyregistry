@@ -78,7 +78,8 @@ export default {
         return jsonResponse(
           {
             status: "ok",
-            service: "chittyregistry-universal",
+            service: "chittyregistry",
+            service_variant: "universal",
             version: "2.0.0",
             tier: 2,
             role: "Directory — read-only catalog of certified entries. Submit registrations to https://register.chitty.cc.",
@@ -232,6 +233,29 @@ export default {
       if (path === "/api/v1/manifest" && request.method === "GET") {
         const manifest = await getCatalogManifest(env);
         return jsonResponse({ success: true, manifest }, 200, corsHeaders);
+      }
+
+      // Internal upsert for already-validated records (used by Register's external-MCP bridge).
+      // Service-binding-only: requires X-Internal-Source header AND must come over a
+      // Cloudflare service binding (request.cf is undefined on service-binding calls).
+      if (path === "/internal/upsert" && request.method === "POST") {
+        const internalSource = request.headers.get("X-Internal-Source");
+        if (!internalSource) {
+          return jsonResponse({ success: false, error: "internal-only endpoint" }, 403, corsHeaders);
+        }
+        const record = await request.json().catch(() => null);
+        if (!record || !record.chitty_id || !record.name) {
+          return jsonResponse({ success: false, error: "chitty_id and name required" }, 400, corsHeaders);
+        }
+        const key = `tools:item:${record.chitty_id}`;
+        const indexKey = `tools:by-subtype:${record.subtype || "service"}:${record.chitty_id}`;
+        try {
+          await env.REGISTRY_STORE.put(key, JSON.stringify(record));
+          await env.REGISTRY_STORE.put(indexKey, record.chitty_id);
+          return jsonResponse({ success: true, chitty_id: record.chitty_id, source: internalSource }, 200, corsHeaders);
+        } catch (e) {
+          return jsonResponse({ success: false, error: e.message }, 500, corsHeaders);
+        }
       }
 
       // Manual trigger for the health sweep (cron also runs this on schedule).
@@ -819,6 +843,7 @@ async function getCatalogManifest(env) {
   manifest.content_hash = Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+  manifest.manifest_hash = manifest.content_hash;
   return manifest;
 }
 

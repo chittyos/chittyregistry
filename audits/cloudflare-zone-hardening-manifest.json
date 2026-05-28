@@ -1,0 +1,102 @@
+{
+  "$schema": "chittyos://schema/cloudflare-zone-hardening/v1",
+  "account_id": "0bc21e3a5a9de1a4cc843be9c3e98121",
+  "account_name": "ChittyCorp LLC",
+  "generated_at": "2026-05-27",
+  "source_audit": "audits/cloudflare-account-121-full-inventory-2026-05-27.md",
+  "policy": "all-zones-equal-baseline",
+  "broker": {
+    "required": true,
+    "path": "ch1tty -> ChittyConnect",
+    "fail_closed_code": "POLICY_BLOCKED_CHITTYCONNECT_UNAVAILABLE",
+    "direct_api_forbidden": true
+  },
+  "tiers": {
+    "core": {
+      "description": "Production-bearing zones — full hardening including HSTS preload",
+      "zones": ["chitty.cc", "ch1tty.com", "nevershitty.com"]
+    },
+    "active": {
+      "description": "Active zones without preload eligibility yet — HSTS without preload",
+      "zones": ["chicagoapps.com", "chittycorp.com", "chittyservices.com", "chittystreet.com", "mychitty.com", "thechitty.com"]
+    },
+    "parked": {
+      "description": "Parked/idle zones with 0 DNS records — baseline TLS only, no HSTS until they host content",
+      "zones": ["chicagoparkingspots.com", "chittyfoundation.org", "distributedreputation.com"]
+    }
+  },
+  "desired_settings": {
+    "core": {
+      "min_tls_version": "1.2",
+      "tls_1_3": "on",
+      "always_use_https": "on",
+      "automatic_https_rewrites": "on",
+      "opportunistic_encryption": "on",
+      "ssl": "strict",
+      "security_header": {
+        "strict_transport_security": {
+          "enabled": true,
+          "max_age": 31536000,
+          "include_subdomains": true,
+          "preload": true,
+          "nosniff": true
+        }
+      },
+      "0rtt": "on"
+    },
+    "active": {
+      "min_tls_version": "1.2",
+      "tls_1_3": "on",
+      "always_use_https": "on",
+      "automatic_https_rewrites": "on",
+      "opportunistic_encryption": "on",
+      "ssl": "strict",
+      "security_header": {
+        "strict_transport_security": {
+          "enabled": true,
+          "max_age": 31536000,
+          "include_subdomains": true,
+          "preload": false,
+          "nosniff": true
+        }
+      },
+      "0rtt": "off"
+    },
+    "parked": {
+      "min_tls_version": "1.2",
+      "tls_1_3": "on",
+      "always_use_https": "on",
+      "automatic_https_rewrites": "on",
+      "opportunistic_encryption": "on",
+      "ssl": "strict",
+      "security_header": {
+        "strict_transport_security": {
+          "enabled": false,
+          "max_age": 0,
+          "include_subdomains": false,
+          "preload": false,
+          "nosniff": false
+        }
+      },
+      "0rtt": "off"
+    }
+  },
+  "current_state_evidence": {
+    "min_tls_version": "1.0 on all 12 zones (audit lines ~780)",
+    "always_use_https": "on for ch1tty.com, chitty.cc, nevershitty.com only (3 of 12)",
+    "strict_transport_security": "disabled on all 12 zones (enabled=false, max_age=0)",
+    "0rtt": "off everywhere except chitty.cc=on",
+    "tls_1_3": "on everywhere except chitty.cc=zrt"
+  },
+  "risk_notes": [
+    "HSTS preload is one-way — once a zone is on the HSTS preload list, removal can take months. Only apply preload=true to tier=core zones with confirmed HTTPS-only operation.",
+    "Setting always_use_https on a zone with mixed HTTP/HTTPS traffic will break HTTP-only clients. Verify each tier=active zone serves traffic before enabling.",
+    "min_tls_version=1.2 will reject TLS 1.0/1.1 clients (old IoT, very old browsers). Acceptable risk for these zones.",
+    "ssl=strict requires the origin certificate to be valid. For workers-only zones (chitty.cc etc.) this is automatic. For any zone with non-CF origins, verify origin cert validity first."
+  ],
+  "rollout_order": [
+    {"step": 1, "tier": "parked", "rationale": "Lowest risk — 0 DNS records means no live traffic"},
+    {"step": 2, "tier": "active", "rationale": "Worker-route-less but non-zero DNS — verify no HTTP-only consumers"},
+    {"step": 3, "tier": "core", "rationale": "Highest traffic — apply last with HSTS preload as final step"}
+  ]
+}
