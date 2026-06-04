@@ -8,7 +8,7 @@
     "deploy": "npx wrangler deploy",
     "deploy:staging": "npx wrangler deploy --env staging",
     "deploy:production": "npx wrangler deploy --env production",
-    "lint": "eslint . --ext .js,.ts --max-warnings 0",
+    "lint": "eslint . --max-warnings 0",
     "test": "jest",
     "validate": "npx wrangler validate",
     "tail": "npx wrangler tail"
@@ -27,6 +27,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/cors": "^2.8.13",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",

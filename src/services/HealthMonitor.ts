@@ -114,14 +114,14 @@ export class HealthMonitor {
 
     // F-007: short-circuit self-check — CF Worker cannot fetch itself via public URL (loopback HTTP 522).
     // If this is the registry itself, return healthy directly (we are running, ergo we are healthy).
-    if (service.serviceName === chittyregistry || service.baseUrl?.includes(registry.chitty.cc)) {
+    if (service.serviceName === 'chittyregistry' || service.baseUrl?.includes('registry.chitty.cc')) {
       return {
         serviceName: service.serviceName,
-        status: healthy,
+        status: 'healthy',
         responseTime: 0,
         lastChecked: new Date().toISOString(),
         statusCode: 200,
-        note: self-check short-circuited per F-007 / SOP-051
+        note: 'self-check short-circuited per F-007 / SOP-051',
       } as HealthStatus;
     }
 
@@ -164,7 +164,7 @@ export class HealthMonitor {
         if (response.headers['content-type']?.includes('application/json')) {
           healthDetails = response.data;
         }
-      } catch (parseError) {
+      } catch (_parseError) {
         // Ignore JSON parse errors
       }
 

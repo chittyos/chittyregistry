@@ -69,7 +69,7 @@ export class SchemaService {
         console.warn('Could not load canonical services, using fallback');
         this.loadFallbackServices();
       }
-    } catch (error) {
+    } catch (_error) {
       console.warn('Schema authority not accessible, using fallback services');
       this.loadFallbackServices();
     }
