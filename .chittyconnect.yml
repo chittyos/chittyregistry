@@ -1,4 +1,7 @@
 # ChittyConnect Configuration for chittyregistry
+context: chittycanon://core/services/chitty-registry
+owner: CHITTYOS
+
 service:
   name: chittyregistry
   display_name: Chittyregistry
@@ -6,6 +9,8 @@ service:
   tier: 2
   organization: CHITTYOS
   chitty_id: ${CHITTYREGISTRY_SERVICE_ID}
+  owner: CHITTYOS
+  context: chittycanon://core/services/chitty-registry
   domains:
     production: registry.chitty.cc
 
