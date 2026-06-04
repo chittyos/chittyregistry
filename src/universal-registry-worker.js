@@ -236,9 +236,15 @@ export default {
       }
 
       // Internal upsert for already-validated records (used by Register's external-MCP bridge).
-      // Service-binding-only: requires X-Internal-Source header AND must come over a
-      // Cloudflare service binding (request.cf is undefined on service-binding calls).
+      // Gating relies on two layers: the upstream read-only guard (lines 30-69) blocks
+      // public writes via the X-Chitty-Internal-Binding service-binding header check,
+      // and this handler additionally requires X-Internal-Source for caller attribution.
+      // The redundant local binding check below is defense-in-depth in case the upstream
+      // guard is ever refactored.
       if (path === "/internal/upsert" && request.method === "POST") {
+        if (request.headers.get("X-Chitty-Internal-Binding") !== "chittyregister") {
+          return jsonResponse({ success: false, error: "internal-only endpoint" }, 403, corsHeaders);
+        }
         const internalSource = request.headers.get("X-Internal-Source");
         if (!internalSource) {
           return jsonResponse({ success: false, error: "internal-only endpoint" }, 403, corsHeaders);
@@ -247,14 +253,16 @@ export default {
         if (!record || !record.chitty_id || !record.name) {
           return jsonResponse({ success: false, error: "chitty_id and name required" }, 400, corsHeaders);
         }
+        const subtype = String(record.subtype || "service");
         const key = `tools:item:${record.chitty_id}`;
-        const indexKey = `tools:by-subtype:${record.subtype || "service"}:${record.chitty_id}`;
+        const indexKey = `tools:by-subtype:${subtype}:${record.chitty_id}`;
         try {
-          await env.REGISTRY_STORE.put(key, JSON.stringify(record));
+          // Write index first so a mid-write failure leaves no orphan item record.
           await env.REGISTRY_STORE.put(indexKey, record.chitty_id);
+          await env.REGISTRY_STORE.put(key, JSON.stringify(record));
           return jsonResponse({ success: true, chitty_id: record.chitty_id, source: internalSource }, 200, corsHeaders);
-        } catch (e) {
-          return jsonResponse({ success: false, error: e.message }, 500, corsHeaders);
+        } catch {
+          return jsonResponse({ success: false, error: "upsert failed" }, 500, corsHeaders);
         }
       }
 

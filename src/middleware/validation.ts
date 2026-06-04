@@ -125,7 +125,14 @@ export function validateParams<T>(schema: ZodSchema<T>) {
         return;
       }
 
-      req.params = result.data as any;
+      // Mirror validateQuery's defineProperty pattern — Express 5 may make req.params
+      // a read-only getter in a future patch; this stays compatible either way.
+      Object.defineProperty(req, 'params', {
+        value: result.data,
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
       next();
 
     } catch (error) {
