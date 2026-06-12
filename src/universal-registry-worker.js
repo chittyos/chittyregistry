@@ -499,14 +499,30 @@ export default {
       }
 
       // POST /v0.1/servers — register a new MCP server (auth required)
+      //
+      // Two accepted write paths (matches the global gateway policy at the top of
+      // fetch()): (1) a Cloudflare service binding from chittyregister — no
+      // CF-Connecting-IP AND X-Chitty-Internal-Binding: chittyregister; or
+      // (2) the MCP_REGISTRY_ADMIN_TOKEN as a Bearer. The binding path is the
+      // canonical first-party route: it lets the register→discovery bridge
+      // propagate MCP servers into the mcp-servers: KV without a plaintext admin
+      // token in the caller. Before this change /v0.1/servers ONLY honored the
+      // admin token, so a binding call (which carries no Bearer) was rejected —
+      // making the CQRS "Register = write, Registry = discovery" untrue for MCP
+      // servers. The gateway already computed the same isServiceBinding test;
+      // this aligns the inner check with it.
       if (path === "/v0.1/servers" && request.method === "POST") {
+        const isServiceBinding =
+          !request.headers.get("CF-Connecting-IP") &&
+          request.headers.get("X-Chitty-Internal-Binding") === "chittyregister";
+
         const adminToken = env.MCP_REGISTRY_ADMIN_TOKEN;
         const authHeader = request.headers.get("Authorization") || "";
         const bearerToken = authHeader.startsWith("Bearer ")
           ? authHeader.slice(7).trim()
           : "";
 
-        if (!adminToken || bearerToken !== adminToken) {
+        if (!isServiceBinding && (!adminToken || bearerToken !== adminToken)) {
           return jsonResponse(
             { error: "Unauthorized registry mutation" },
             401,
