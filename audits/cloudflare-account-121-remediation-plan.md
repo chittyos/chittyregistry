@@ -102,7 +102,7 @@
 ## next_actions[]
 
 1. `scripts/apply-zone-hardening.sh --tier parked` — dry-run, review diff for the 3 parked zones
-2. Provision `CHITTYCONNECT_BROKER_URL` + `CHITTYCONNECT_BROKER_TOKEN` env via 1Password
+2. Provision `CHITTYCONNECT_BROKER_URL` + `CHITTYCONNECT_BROKER_TOKEN` env via chittysecrets
 3. `scripts/apply-zone-hardening.sh --apply --tier parked` — execute parked tier through broker (lowest blast radius first)
 4. Verify with `curl -sI https://<zone>` that `strict-transport-security` header is present post-apply
 5. Repeat for tier=active, then tier=core

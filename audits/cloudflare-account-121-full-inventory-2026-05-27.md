@@ -439,7 +439,7 @@ derail-me              | main | domains: derail-me.pages.dev, derail.me
 - **LB Monitors:** Permission gap (auth error)
 - **Tunnels (cloudflared):** 3
   - `ch1tty` — healthy, 4 connections
-  - `chittyconnect-1password` — healthy, 4 connections
+  - `chittyconnect-chittysecrets` — healthy, 4 connections
   - `bluebubbles-bb-claw` — **down**, 0 connections
 - **Spectrum / Magic Transit / Magic WAN / WARP devices:** 0 / not subscribed
 - **Argo Smart Routing / Tiered Cache / Cache Reserve / Wait Rooms / Bot Management / API Shield:** Permission gap on read (auth error)

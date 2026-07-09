@@ -12,17 +12,17 @@
 Identified 9 patches (3 settings × 3 zones).
 
 ### Step 2 — Provision broker creds ✅ (1P items created)
-Both items provisioned in 1Password `ChittyOS-Core` vault via chittymini-00 after user enabled 1Password Desktop CLI integration mid-session:
+Both items provisioned in chittysecrets `ChittyOS-Core` vault via chittymini-00 after user enabled chittysecrets Desktop CLI integration mid-session:
 
 - **`CHITTYCONNECT_BROKER_URL`** — item id `b7kt23tuyn4p4f2j2kxt3g23ji`, credential = `https://connect.chitty.cc`
 - **`CHITTYCONNECT_BROKER_TOKEN`** — item id `6rcnagjmvg276svr6fkjzdssgy`, credential = chittyconnect bearer token
 
 Tags: `chittyconnect`, `broker`, `canonical`. Canonical env file at `/home/ubuntu/.ch1tty/broker/canonical.env` references the new 1P item refs.
 
-(Earlier in session this step's literal form was blocked by 4 unavailable auth paths; resolved after user toggled "Allow connections from CLI" in the 1Password Desktop app on chittymini-00.)
+(Earlier in session this step's literal form was blocked by 4 unavailable auth paths; resolved after user toggled "Allow connections from CLI" in the chittysecrets Desktop app on chittymini-00.)
 **Provisioned to disk:** `/home/ubuntu/.ch1tty/broker/canonical.env` mode 600 with both `CHITTYCONNECT_BROKER_URL=https://connect.chitty.cc` and `CHITTYCONNECT_BROKER_TOKEN` (mirrors `CHITTY_MCP_BEARER_TOKEN`). Sourceable by future sessions.
 
-**1Password item-create is environmentally impossible from this VM:**
+**chittysecrets item-create is environmentally impossible from this VM:**
 - `op item create` blocked by Connect mode (operator policy)
 - 1P Connect REST API write → 403 (token is read-only)
 - 1P Service Account Token → permission 101 on accessible vaults (`synthetic-prod`, `synthetic-shared`); no access to `ChittyOS` / `ChittyOS-Core` vaults

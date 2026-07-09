@@ -37,7 +37,7 @@ jobs:
         run: npm install --prefix /tmp/wrangler-cli wrangler
 
       - name: Validate wrangler configuration
-        run: /tmp/wrangler-cli/node_modules/.bin/wrangler deploy --dry-run --outdir=./dist
+        run: /tmp/wrangler-cli/node_modules/.bin/cf deploy --dry-run --outdir=./dist
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
@@ -65,7 +65,7 @@ jobs:
         run: npm install --prefix /tmp/wrangler-cli wrangler
 
       - name: Deploy to Cloudflare Workers (Staging)
-        run: /tmp/wrangler-cli/node_modules/.bin/wrangler deploy
+        run: /tmp/wrangler-cli/node_modules/.bin/cf deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -98,7 +98,7 @@ jobs:
         run: npm install --prefix /tmp/wrangler-cli wrangler
 
       - name: Deploy to Cloudflare Workers (Production)
-        run: /tmp/wrangler-cli/node_modules/.bin/wrangler deploy
+        run: /tmp/wrangler-cli/node_modules/.bin/cf deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

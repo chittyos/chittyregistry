@@ -5,9 +5,9 @@
   "main": "src/universal-registry-worker.js",
   "scripts": {
     "dev": "npx wrangler dev",
-    "deploy": "npx wrangler deploy",
-    "deploy:staging": "npx wrangler deploy --env staging",
-    "deploy:production": "npx wrangler deploy --env production",
+    "deploy": "npx cf deploy",
+    "deploy:staging": "npx cf deploy --env staging",
+    "deploy:production": "npx cf deploy --env production",
     "lint": "eslint . --max-warnings 0",
     "test": "jest",
     "validate": "npx wrangler validate",

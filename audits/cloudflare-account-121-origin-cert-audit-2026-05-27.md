@@ -34,7 +34,7 @@ The placeholder A records (`172.67.x.x`, `104.21.x.x`, `192.0.2.1`) are CF anyca
 ### CF-Internal breakdown
 - **Worker-routed A records (CF anycast IPs)** — `ai`, `chat`, `qa`, apex `chitty.cc` (all → `172.67.137.24` / `104.21.62.164`, proxied)
 - **Worker-only via TEST-NET-1** — `mcp.chitty.cc` (`192.0.2.1`, proxied, served by Worker bound to route)
-- **Cloudflare Tunnels (`*.cfargotunnel.com`)** — `1password-connect`, `bb-claw`, `ch1tty`, `cowork`, `gam`, `mercury-proxy`, `ollama` (tunnels present a CF-issued internal cert; strict-safe)
+- **Cloudflare Tunnels (`*.cfargotunnel.com`)** — `chittysecrets-connect`, `bb-claw`, `ch1tty`, `cowork`, `gam`, `mercury-proxy`, `ollama` (tunnels present a CF-issued internal cert; strict-safe)
 - **Cloudflare Pages (`*.pages.dev`)** — `app.command`, `app.connect`, `app.ledger`, `app.trace`, `chittyid`, `cmd`, `verify` (CF-managed Universal SSL; strict-safe)
 - **Cloudflare Agents Gateway** — `mcp-portal`, `msg` → `gateway.agents.cloudflare.com` (CF-managed; strict-safe)
 
