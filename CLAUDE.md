@@ -36,11 +36,11 @@ npm test                     # Run test suite
 ### Cloudflare Workers Commands
 ```bash
 # Deploy with wrangler directly
-cf deploy
+wrangler deploy
 
 # Environment-specific deployment
-cf deploy --env staging
-cf deploy --env production
+wrangler deploy --env staging
+wrangler deploy --env production
 
 # Tail logs
 wrangler tail

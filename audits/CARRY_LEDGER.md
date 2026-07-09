@@ -6,7 +6,7 @@ Synthesized from this session + audits + TaskList. Updated as items close.
 - `SAFE_REPO` — repo-only, no deploy, no secret, no third-party
 - `NEEDS_OPERATOR` — needs explicit human decision/approval
 - `NEEDS_SECRET` — mutates a credential/secret
-- `NEEDS_DEPLOY` — requires cf deploy
+- `NEEDS_DEPLOY` — requires wrangler deploy
 - `BLOCKED` — externally gated (rate limit, broken upstream, etc.)
 - `DONE` — closed
 
@@ -73,11 +73,11 @@ Synthesized from this session + audits + TaskList. Updated as items close.
 
 | ID | Item | Class | Status |
 |----|------|-------|--------|
-| H1 | Prove deploy.yml/deploy-optimized.sh/package.json don't apply migrations | SAFE_REPO | **DONE** — confirmed all 3 run only `cf deploy` |
+| H1 | Prove deploy.yml/deploy-optimized.sh/package.json don't apply migrations | SAFE_REPO | **DONE** — confirmed all 3 run only `wrangler deploy` |
 | H2 | Check schema_migrations table | SAFE_REPO | **DONE** — does NOT exist in ChittyOS-Core |
 | H3 | Propose minimal schema_migrations DDL | SAFE_REPO | **DONE** — `migrations/001_schema_migrations.sql` |
 | H4 | Build migration runner with checksum drift detection + backfill | SAFE_REPO | **DONE** — `scripts/migrate.sh` (modes: list/dry-run/verify/apply) |
-| H5 | Wire runner into deploy.yml before cf deploy | SAFE_REPO | **DONE** — psql install + 3-step run-migrations job before deploy |
+| H5 | Wire runner into deploy.yml before wrangler deploy | SAFE_REPO | **DONE** — psql install + 3-step run-migrations job before deploy |
 | H6 | Docs: migrations are release artifacts, not documentation | SAFE_REPO | **DONE** — `migrations/README.md` |
 | H7 | DDL approval to create schema_migrations table | NEEDS_OPERATOR | **PENDING** (Task #28) |
 | H8 | GitHub secret `CHITTY_REGISTER_DB_URL` on chittyregister repo | NEEDS_OPERATOR | **PENDING** |
