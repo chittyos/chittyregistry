@@ -3,7 +3,7 @@ uri: chittycanon://docs/tech/registry/ingestion-topology
 namespace: chittycanon://docs/tech
 type: registry
 version: 2.0.0
-status: PENDING
+status: CANONICAL
 registered_with: chittycanon://core/services/canon
 title: "ChittyOS Ingestion Topology Registry"
 author: "Antigravity (bf786cc4)"
