@@ -640,7 +640,7 @@ async function getRegistryStats(env) {
       documentation: 188,
       configs: 200,
     },
-    duplicates: 91,
+    duplicates: 1,
     alternatives: 323,
     directories: 769,
     lastUpdated: new Date().toISOString(),
