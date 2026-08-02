@@ -2,18 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://registry.chitty.cc/schemas/cloudflare-registry-projection.schema.json",
   "title": "CloudflareRegistryProjection",
-  "description": "Registry projection of Cloudflare deployed state. Validates registry-shaped identity, relationships, posture, and drift metadata while delegating object vocabulary to ChittySchema.",
+  "description": "Projection envelope for Cloudflare observations and governed records. ChittyRegistry owns projection mechanics only; ontology, lifecycle vocabulary, relationships, and finding semantics are referenced from ChittyCanon and ChittySchema.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["manifestVersion", "workKey", "generatedAt", "schemaRef", "records", "relationships", "drift"],
+  "required": ["manifestVersion", "workKey", "generatedAt", "sourceMode", "records"],
   "properties": {
-    "manifestVersion": { "type": "string", "const": "0.1.0" },
+    "manifestVersion": { "type": "string", "const": "0.2.0" },
     "workKey": { "type": "string", "const": "chittyregistry-cloudflare-governance" },
     "generatedAt": { "type": "string", "format": "date-time" },
-    "sourceMode": { "type": "string", "enum": ["read_only_inventory", "governed_intent", "reconciliation_preview"] },
-    "schemaRef": {
+    "sourceMode": {
       "type": "string",
-      "const": "https://schema.chitty.cc/infrastructure/cloudflare-governance.schema.json"
+      "description": "Reference to a ChittySchema-governed execution mode value, not a registry-authored ontology term."
+    },
+    "schemaRefs": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri-reference" },
+      "uniqueItems": true
     },
     "sourceAccountRefs": {
       "type": "array",
@@ -26,140 +30,130 @@
     },
     "relationships": {
       "type": "array",
-      "items": { "$ref": "#/$defs/relationship" }
+      "items": { "$ref": "#/$defs/relationshipProjection" }
     },
-    "drift": {
+    "observations": {
       "type": "array",
-      "items": { "$ref": "#/$defs/driftFinding" }
+      "items": { "$ref": "#/$defs/observationProjection" }
     },
     "summary": { "$ref": "#/$defs/summary" }
   },
   "$defs": {
-    "canonicalRef": {
+    "recordRef": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9._:/-]*$",
-      "minLength": 3
+      "minLength": 1
+    },
+    "termRef": {
+      "type": "string",
+      "description": "ChittyCanon ontology term ID or formal proposal ID.",
+      "minLength": 1
+    },
+    "schemaRef": {
+      "type": "string",
+      "format": "uri-reference"
     },
     "recordEnvelope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["canonicalId", "objectClass", "record", "registryPosture", "provenance"],
+      "required": ["recordRef", "record", "provenance"],
       "properties": {
-        "canonicalId": { "$ref": "#/$defs/canonicalRef" },
-        "objectClass": {
-          "type": "string",
-          "enum": [
-            "access_application",
-            "access_policy",
-            "trust_domain",
-            "route_domain_attachment",
-            "mcp_surface",
-            "service_binding",
-            "credential_reference"
-          ]
-        },
+        "recordRef": { "$ref": "#/$defs/recordRef" },
+        "recordSchemaRef": { "$ref": "#/$defs/schemaRef" },
+        "objectClassTermRef": { "$ref": "#/$defs/termRef" },
         "record": {
           "type": "object",
-          "description": "Payload conforming to the ChittySchema Cloudflare governance contract. Runtime validation must resolve schemaRef rather than duplicating the object vocabulary here."
+          "description": "A governed ChittyRegister/ChittySchema record or a Cloudflare observation. Registry does not define the record vocabulary.",
+          "additionalProperties": true
         },
-        "registryPosture": {
+        "projection": {
           "type": "object",
+          "description": "Projection-only metadata. Ontology-bearing status values must be represented by upstream term/schema references.",
           "additionalProperties": false,
-          "required": ["canonicality", "verificationState", "disposition"],
           "properties": {
-            "canonicality": { "type": "string", "enum": ["canonical", "projection", "alias", "candidate", "unknown"] },
-            "verificationState": { "type": "string", "enum": ["observed", "verified", "conflicted", "stale", "unknown"] },
-            "disposition": { "type": "string", "enum": ["keep", "merge", "replace", "alias", "retire", "hold"] },
-            "canonicalTargetRef": { "$ref": "#/$defs/canonicalRef" },
-            "decisionRef": { "type": "string", "minLength": 1 }
+            "lifecycleRef": { "$ref": "#/$defs/termRef" },
+            "dispositionRef": { "$ref": "#/$defs/termRef" },
+            "canonicalTargetRef": { "$ref": "#/$defs/recordRef" },
+            "decisionRef": { "type": "string", "minLength": 1 },
+            "verifiedAt": { "type": "string", "format": "date-time" }
           }
         },
         "provenance": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["sourceSystem", "sourceObjectType", "sourceObjectId", "observedAt", "collector"],
-          "properties": {
-            "sourceSystem": { "type": "string", "const": "cloudflare" },
-            "sourceObjectType": { "type": "string", "minLength": 1 },
-            "sourceObjectId": { "type": "string", "minLength": 1 },
-            "observedAt": { "type": "string", "format": "date-time" },
-            "collector": { "type": "string", "minLength": 1 },
-            "contentHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
-          }
+          "$ref": "#/$defs/provenance"
         }
       }
     },
-    "relationship": {
+    "provenance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["relationshipId", "type", "fromRef", "toRef", "purpose", "verificationState"],
+      "required": ["sourceSystem", "sourceObjectType", "sourceObjectId", "observedAt", "collector"],
       "properties": {
-        "relationshipId": { "$ref": "#/$defs/canonicalRef" },
-        "type": {
-          "type": "string",
-          "enum": [
-            "protects",
-            "routes_to",
-            "attached_to",
-            "member_of",
-            "calls",
-            "bound_to",
-            "authenticated_by",
-            "issued_by",
-            "managed_by",
-            "owned_by",
-            "aliases",
-            "supersedes"
-          ]
-        },
-        "fromRef": { "$ref": "#/$defs/canonicalRef" },
-        "toRef": { "$ref": "#/$defs/canonicalRef" },
-        "purpose": { "type": "string", "minLength": 1 },
-        "allowedOperations": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-        "verificationState": { "type": "string", "enum": ["observed", "verified", "conflicted", "unknown"] },
-        "evidenceRefs": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+        "sourceSystem": { "type": "string", "minLength": 1 },
+        "sourceObjectType": { "type": "string", "minLength": 1 },
+        "sourceObjectId": { "type": "string", "minLength": 1 },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "collector": { "type": "string", "minLength": 1 },
+        "contentHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "evidenceRefs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
       }
     },
-    "driftFinding": {
+    "relationshipProjection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["findingId", "kind", "severity", "subjectRefs", "observedState", "requiredAction", "status"],
+      "required": ["relationshipRef", "relationshipTermRef", "fromRef", "toRef", "provenance"],
       "properties": {
-        "findingId": { "$ref": "#/$defs/canonicalRef" },
-        "kind": {
-          "type": "string",
-          "enum": [
-            "authority_collision",
-            "attachment_overlap",
-            "semantic_redundancy",
-            "policy_duplicate",
-            "policy_scope_drift",
-            "unjustified_bypass",
-            "overbroad_trust",
-            "missing_intent",
-            "stale_alias",
-            "missing_owner",
-            "runtime_schema_mismatch"
-          ]
+        "relationshipRef": { "$ref": "#/$defs/recordRef" },
+        "relationshipTermRef": { "$ref": "#/$defs/termRef" },
+        "fromRef": { "$ref": "#/$defs/recordRef" },
+        "toRef": { "$ref": "#/$defs/recordRef" },
+        "purpose": { "type": "string" },
+        "allowedOperations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
         },
-        "severity": { "type": "string", "enum": ["critical", "high", "medium", "low", "informational"] },
-        "subjectRefs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/canonicalRef" }, "uniqueItems": true },
+        "verificationRef": { "$ref": "#/$defs/termRef" },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "observationProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observationRef", "subjectRefs", "observedState", "provenance"],
+      "properties": {
+        "observationRef": { "$ref": "#/$defs/recordRef" },
+        "observationTermRef": { "$ref": "#/$defs/termRef" },
+        "subjectRefs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/recordRef" },
+          "uniqueItems": true
+        },
         "observedState": { "type": "string", "minLength": 1 },
         "intendedState": { "type": "string" },
-        "requiredAction": { "type": "string", "minLength": 1 },
-        "status": { "type": "string", "enum": ["open", "accepted", "planned", "resolved", "false_positive", "hold"] },
+        "severityRef": { "$ref": "#/$defs/termRef" },
+        "statusRef": { "$ref": "#/$defs/termRef" },
+        "requiredAction": { "type": "string" },
         "decisionRef": { "type": "string" },
-        "rollbackRequired": { "type": "boolean" }
+        "rollbackRequired": { "type": "boolean" },
+        "provenance": { "$ref": "#/$defs/provenance" }
       }
     },
     "summary": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "recordCounts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "recordCount": { "type": "integer", "minimum": 0 },
         "relationshipCount": { "type": "integer", "minimum": 0 },
-        "driftCounts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
-        "blockingFindingRefs": { "type": "array", "items": { "$ref": "#/$defs/canonicalRef" }, "uniqueItems": true }
+        "observationCount": { "type": "integer", "minimum": 0 },
+        "blockingObservationRefs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/recordRef" },
+          "uniqueItems": true
+        }
       }
     }
   }
