@@ -859,9 +859,19 @@ async function getCatalogManifest(env) {
 async function runHealthSweep(env) {
   const tools = await getTools(env, null);
   const results = [];
+  // Counts are unbounded (cheap); the per-record detail is capped so a large
+  // registry cannot blow the Worker's memory or the response size.
+  const SKIP_DETAIL_CAP = 100;
   const skipped = [];
-  const skip = (tool, reason) =>
-    skipped.push({ name: tool.name ?? null, chitty_id: tool.chitty_id ?? null, reason });
+  const skipCounts = {};
+  let skippedTotal = 0;
+  const skip = (tool, reason) => {
+    skippedTotal++;
+    skipCounts[reason] = (skipCounts[reason] ?? 0) + 1;
+    if (skipped.length < SKIP_DETAIL_CAP) {
+      skipped.push({ name: tool.name ?? null, chitty_id: tool.chitty_id ?? null, reason });
+    }
+  };
   for (const tool of tools) {
     // A record with no chitty_id would serialize its KV key as
     // `tools:item:undefined`, collapsing every such record onto one key.
@@ -900,16 +910,17 @@ async function runHealthSweep(env) {
     }
   }
   try { await env.REGISTRY_CACHE?.delete("stats"); } catch { /* cache misses are fine */ }
-  if (skipped.length) {
-    const byReason = skipped.reduce((acc, s) => { acc[s.reason] = (acc[s.reason] ?? 0) + 1; return acc; }, {});
-    console.warn(`[health-sweep] skipped ${skipped.length} of ${tools.length} records`, byReason);
+  if (skippedTotal) {
+    console.warn(`[health-sweep] skipped ${skippedTotal} of ${tools.length} records`, skipCounts);
   }
   return {
     swept_at: new Date().toISOString(),
     total: tools.length,
     count: results.length,
-    skipped_count: skipped.length,
+    skipped_count: skippedTotal,
+    skipped_by_reason: skipCounts,
     skipped,
+    skipped_detail_truncated: skippedTotal > skipped.length,
     results,
   };
 }
@@ -929,13 +940,36 @@ function isOwnOrigin(healthUrl, env) {
 function isUnsweepableHost(healthUrl) {
   let host;
   try { host = new URL(healthUrl).hostname; } catch { return true; }
-  if (host === "localhost" || host.endsWith(".localhost")) return true;
-  if (host === "::1" || host === "[::1]") return true;
-  if (/^127\./.test(host)) return true;
-  if (/^10\./.test(host)) return true;
-  if (/^192\.168\./.test(host)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
-  if (/^169\.254\./.test(host)) return true;
+  // URL() keeps IPv6 literals bracketed; strip for comparison.
+  const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const h = bare.toLowerCase().replace(/\.$/, ""); // trailing dot is the same name
+
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+
+  // IPv6: loopback, unique-local (fc00::/7), link-local (fe80::/10),
+  // unspecified, and IPv4-mapped forms like ::ffff:127.0.0.1.
+  if (h.includes(":")) {
+    if (h === "::1" || h === "::") return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(h)) return true;
+    if (/^fe[89ab][0-9a-f]:/.test(h)) return true;
+    const mapped = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isUnsweepableHost(`http://${mapped[1]}/`);
+    return true; // any other raw IPv6 literal is not a registry endpoint
+  }
+
+  // A bare integer, hex, or octal host is an alternate encoding of an IPv4
+  // address (http://2130706433/ === http://127.0.0.1/). No legitimate registry
+  // endpoint is addressed this way, so refuse the whole class rather than
+  // trying to decode each form.
+  if (/^(0x[0-9a-f]+|\d+)$/.test(h)) return true;
+  if (/^0\d/.test(h)) return true;
+
+  if (/^127\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^0\./.test(h)) return true;
   return false;
 }
 
