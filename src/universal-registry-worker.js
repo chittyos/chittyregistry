@@ -859,17 +859,59 @@ async function getCatalogManifest(env) {
 async function runHealthSweep(env) {
   const tools = await getTools(env, null);
   const results = [];
+  // Counts are unbounded (cheap); the per-record detail is capped so a large
+  // registry cannot blow the Worker's memory or the response size.
+  const SKIP_DETAIL_CAP = 100;
+  const skipped = [];
+  const skipCounts = {};
+  let skippedTotal = 0;
+  const skip = (tool, reason) => {
+    skippedTotal++;
+    skipCounts[reason] = (skipCounts[reason] ?? 0) + 1;
+    if (skipped.length < SKIP_DETAIL_CAP) {
+      skipped.push({ name: tool.name ?? null, chitty_id: tool.chitty_id ?? null, reason });
+    }
+  };
   for (const tool of tools) {
-    if (tool.entity_type !== "T") continue;
-    if (!["service", "mcp-server"].includes(tool.subtype)) continue;
+    // A record with no chitty_id would serialize its KV key as
+    // `tools:item:undefined`, collapsing every such record onto one key.
+    // Skip before any write path can reach it.
+    if (!tool.chitty_id) { skip(tool, "missing_chitty_id"); continue; }
+    if (tool.entity_type !== "T") { skip(tool, "entity_type_not_T"); continue; }
+    if (!["service", "mcp-server"].includes(tool.subtype)) { skip(tool, "subtype_not_swept"); continue; }
     const healthUrl = pickHealthUrl(tool);
-    if (!healthUrl) continue;
+    if (!healthUrl) { skip(tool, "no_resolvable_health_url"); continue; }
+    if (isUnsweepableHost(healthUrl)) { skip(tool, "loopback_or_private_host"); continue; }
+    if (isOwnOrigin(healthUrl, env)) { skip(tool, "self_origin"); continue; }
     let health = "unknown";
     let error = null;
     try {
-      const resp = await fetch(healthUrl, { method: "GET", signal: AbortSignal.timeout(5000) });
-      health = resp.ok ? "healthy" : "unhealthy";
-      if (!resp.ok) error = `HTTP ${resp.status}`;
+      // redirect: "manual" is load-bearing, for two reasons.
+      //
+      // 1. Security: Workers follow redirects by default, and the host checks
+      //    above only ever see the FIRST hop. A public endpoint that 302s to
+      //    http://127.0.0.1/ or 169.254.169.254 would sail straight past them.
+      // 2. Correctness: an Access-gated endpoint 302s to a Cloudflare Access
+      //    login page that returns 200, so following the redirect recorded the
+      //    service as "healthy" when it was never actually reached.
+      //
+      // A /health that redirects has not answered, so treat 3xx as its own
+      // non-healthy state rather than chasing it.
+      const resp = await fetch(healthUrl, {
+        method: "GET",
+        redirect: "manual",
+        signal: AbortSignal.timeout(5000),
+      });
+      if (resp.status >= 300 && resp.status < 400) {
+        health = "unverifiable";
+        const target = resp.headers.get("location");
+        let targetHost = "unknown";
+        try { targetHost = new URL(target, healthUrl).host; } catch { /* keep unknown */ }
+        error = `HTTP ${resp.status} redirect to ${targetHost} (not followed)`;
+      } else {
+        health = resp.ok ? "healthy" : "unhealthy";
+        if (!resp.ok) error = `HTTP ${resp.status}`;
+      }
     } catch (e) {
       health = "unreachable";
       error = e.message;
@@ -891,7 +933,67 @@ async function runHealthSweep(env) {
     }
   }
   try { await env.REGISTRY_CACHE?.delete("stats"); } catch { /* cache misses are fine */ }
-  return { swept_at: new Date().toISOString(), count: results.length, results };
+  if (skippedTotal) {
+    console.warn(`[health-sweep] skipped ${skippedTotal} of ${tools.length} records`, skipCounts);
+  }
+  return {
+    swept_at: new Date().toISOString(),
+    total: tools.length,
+    count: results.length,
+    skipped_count: skippedTotal,
+    skipped_by_reason: skipCounts,
+    skipped,
+    skipped_detail_truncated: skippedTotal > skipped.length,
+    results,
+  };
+}
+
+// Cloudflare cannot fetch a Worker's own zone from inside that Worker — the
+// request loops back and returns 522. Scoring our own /health as an outage is
+// an artifact, not a signal. (F-007; the original fix landed in the undeployed
+// HealthMonitor.ts, so it never took effect here.)
+function isOwnOrigin(healthUrl, env) {
+  const self = env?.REGISTRY_PUBLIC_ORIGIN ?? "https://registry.chitty.cc";
+  try { return new URL(healthUrl).origin === new URL(self).origin; } catch { return false; }
+}
+
+// Loopback and private hosts are unreachable from a Worker by definition.
+// Scoring them produces a permanent false failure (e.g. openclaw's 403 on
+// http://127.0.0.1:18789/health), so exclude them rather than grade them.
+function isUnsweepableHost(healthUrl) {
+  let host;
+  try { host = new URL(healthUrl).hostname; } catch { return true; }
+  // URL() keeps IPv6 literals bracketed; strip for comparison.
+  const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const h = bare.toLowerCase().replace(/\.$/, ""); // trailing dot is the same name
+
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+
+  // IPv6: loopback, unique-local (fc00::/7), link-local (fe80::/10),
+  // unspecified, and IPv4-mapped forms like ::ffff:127.0.0.1.
+  if (h.includes(":")) {
+    if (h === "::1" || h === "::") return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(h)) return true;
+    if (/^fe[89ab][0-9a-f]:/.test(h)) return true;
+    const mapped = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isUnsweepableHost(`http://${mapped[1]}/`);
+    return true; // any other raw IPv6 literal is not a registry endpoint
+  }
+
+  // A bare integer, hex, or octal host is an alternate encoding of an IPv4
+  // address (http://2130706433/ === http://127.0.0.1/). No legitimate registry
+  // endpoint is addressed this way, so refuse the whole class rather than
+  // trying to decode each form.
+  if (/^(0x[0-9a-f]+|\d+)$/.test(h)) return true;
+  if (/^0\d/.test(h)) return true;
+
+  if (/^127\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^0\./.test(h)) return true;
+  return false;
 }
 
 function pickHealthUrl(tool) {
