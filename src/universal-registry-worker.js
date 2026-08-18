@@ -859,11 +859,20 @@ async function getCatalogManifest(env) {
 async function runHealthSweep(env) {
   const tools = await getTools(env, null);
   const results = [];
+  const skipped = [];
+  const skip = (tool, reason) =>
+    skipped.push({ name: tool.name ?? null, chitty_id: tool.chitty_id ?? null, reason });
   for (const tool of tools) {
-    if (tool.entity_type !== "T") continue;
-    if (!["service", "mcp-server"].includes(tool.subtype)) continue;
+    // A record with no chitty_id would serialize its KV key as
+    // `tools:item:undefined`, collapsing every such record onto one key.
+    // Skip before any write path can reach it.
+    if (!tool.chitty_id) { skip(tool, "missing_chitty_id"); continue; }
+    if (tool.entity_type !== "T") { skip(tool, "entity_type_not_T"); continue; }
+    if (!["service", "mcp-server"].includes(tool.subtype)) { skip(tool, "subtype_not_swept"); continue; }
     const healthUrl = pickHealthUrl(tool);
-    if (!healthUrl) continue;
+    if (!healthUrl) { skip(tool, "no_resolvable_health_url"); continue; }
+    if (isUnsweepableHost(healthUrl)) { skip(tool, "loopback_or_private_host"); continue; }
+    if (isOwnOrigin(healthUrl, env)) { skip(tool, "self_origin"); continue; }
     let health = "unknown";
     let error = null;
     try {
@@ -891,7 +900,43 @@ async function runHealthSweep(env) {
     }
   }
   try { await env.REGISTRY_CACHE?.delete("stats"); } catch { /* cache misses are fine */ }
-  return { swept_at: new Date().toISOString(), count: results.length, results };
+  if (skipped.length) {
+    const byReason = skipped.reduce((acc, s) => { acc[s.reason] = (acc[s.reason] ?? 0) + 1; return acc; }, {});
+    console.warn(`[health-sweep] skipped ${skipped.length} of ${tools.length} records`, byReason);
+  }
+  return {
+    swept_at: new Date().toISOString(),
+    total: tools.length,
+    count: results.length,
+    skipped_count: skipped.length,
+    skipped,
+    results,
+  };
+}
+
+// Cloudflare cannot fetch a Worker's own zone from inside that Worker — the
+// request loops back and returns 522. Scoring our own /health as an outage is
+// an artifact, not a signal. (F-007; the original fix landed in the undeployed
+// HealthMonitor.ts, so it never took effect here.)
+function isOwnOrigin(healthUrl, env) {
+  const self = env?.REGISTRY_PUBLIC_ORIGIN ?? "https://registry.chitty.cc";
+  try { return new URL(healthUrl).origin === new URL(self).origin; } catch { return false; }
+}
+
+// Loopback and private hosts are unreachable from a Worker by definition.
+// Scoring them produces a permanent false failure (e.g. openclaw's 403 on
+// http://127.0.0.1:18789/health), so exclude them rather than grade them.
+function isUnsweepableHost(healthUrl) {
+  let host;
+  try { host = new URL(healthUrl).hostname; } catch { return true; }
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host === "::1" || host === "[::1]") return true;
+  if (/^127\./.test(host)) return true;
+  if (/^10\./.test(host)) return true;
+  if (/^192\.168\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+  if (/^169\.254\./.test(host)) return true;
+  return false;
 }
 
 function pickHealthUrl(tool) {
