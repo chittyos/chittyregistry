@@ -886,9 +886,32 @@ async function runHealthSweep(env) {
     let health = "unknown";
     let error = null;
     try {
-      const resp = await fetch(healthUrl, { method: "GET", signal: AbortSignal.timeout(5000) });
-      health = resp.ok ? "healthy" : "unhealthy";
-      if (!resp.ok) error = `HTTP ${resp.status}`;
+      // redirect: "manual" is load-bearing, for two reasons.
+      //
+      // 1. Security: Workers follow redirects by default, and the host checks
+      //    above only ever see the FIRST hop. A public endpoint that 302s to
+      //    http://127.0.0.1/ or 169.254.169.254 would sail straight past them.
+      // 2. Correctness: an Access-gated endpoint 302s to a Cloudflare Access
+      //    login page that returns 200, so following the redirect recorded the
+      //    service as "healthy" when it was never actually reached.
+      //
+      // A /health that redirects has not answered, so treat 3xx as its own
+      // non-healthy state rather than chasing it.
+      const resp = await fetch(healthUrl, {
+        method: "GET",
+        redirect: "manual",
+        signal: AbortSignal.timeout(5000),
+      });
+      if (resp.status >= 300 && resp.status < 400) {
+        health = "unverifiable";
+        const target = resp.headers.get("location");
+        let targetHost = "unknown";
+        try { targetHost = new URL(target, healthUrl).host; } catch { /* keep unknown */ }
+        error = `HTTP ${resp.status} redirect to ${targetHost} (not followed)`;
+      } else {
+        health = resp.ok ? "healthy" : "unhealthy";
+        if (!resp.ok) error = `HTTP ${resp.status}`;
+      }
     } catch (e) {
       health = "unreachable";
       error = e.message;
