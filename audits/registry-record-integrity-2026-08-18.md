@@ -51,13 +51,33 @@ the object shape can never resolve, even if entity_type were fixed.
 Both skips are bare `continue` with no log, no counter, no marker. 29 services
 are silently omitted from every sweep and nothing anywhere reports the omission.
 
-## Latent corruption
+## ~~Latent corruption~~ — SEVERITY CORRECTED 2026-08-18
 
-Line 878 writes `REGISTRY_STORE.put(\`tools:item:${tool.chitty_id}\`, ...)`.
-For a record with no `chitty_id` that key is literally `tools:item:undefined`.
-The `entity_type` filter currently prevents any of them reaching it — so all 29
-would collide on a single key the moment someone "fixes" entity_type alone.
-**Do not backfill entity_type without first backfilling chitty_id.**
+The original draft claimed that backfilling `entity_type` without `chitty_id`
+"would destroy 28 of the 29 records." **That was wrong**, and the error was mine.
+
+`listAllToolIds()` (:738-748) lists by KV key prefix and derives each id from the
+**key name** (`key.name.slice("tools:item:".length)`), not from the record body.
+`getTools()` (:750) then fetches `tools:item:${id}`. Per the account-121
+execution report (see Origin, below), the 29 were written at keys
+`tools:item:did:chitty:foundation:{name}`.
+
+So a sweep write of `tools:item:${tool.chitty_id}` with an undefined `chitty_id`
+creates ONE new orphan key, `tools:item:undefined`. It does not overwrite any of
+the 29 DID-keyed records. Nothing is destroyed.
+
+The real (milder) consequence, had the filters been "fixed" naively: each
+record's health update would silently land on the orphan key instead of on the
+record, so health would never persist for those 29 and one junk entry would
+appear in the catalog listing.
+
+Even that requires TWO changes, not one: the records would also have to get
+array-shaped `endpoints`, because `pickHealthUrl()` returns null on their object
+shape and skips them before the write is reached.
+
+The `!tool.chitty_id` guard shipped in PR #181 is still correct and worth having
+— it is cheap, it prevents the orphan key, and it makes the invariant explicit.
+But it is defensive hygiene, not the defusing of a data-loss bomb.
 
 ## Misleading status signals (three, all failing toward false alarm)
 
@@ -147,29 +167,47 @@ straight into the `REGISTRY_STORE` KV namespace via the Cloudflare API, `wrangle
 kv` CLI, or the dashboard. The vehicle is **unknown** — see the retraction below;
 the one script previously suspected has since been read in full and ruled out.
 
-## ~~Suspected origin~~ — RETRACTED 2026-08-18
+## Origin — IDENTIFIED 2026-08-18 (no longer unknown)
 
-The earlier draft named `scripts/registry-backfill-from-cf-inventory.sh` as the
-likely vehicle. **That is ruled out**, on two independent grounds:
+The write vehicle is documented in this repository, in
+`audits/cloudflare-account-121-execution-report-2026-05-27.md`, Step 7:
 
-1. **Timing.** Commit `030f6a1` (2026-05-26 14:31 -0500) added the
-   `chitty_id`-required validation and made `POST /api/v1/tools` return 400 on
-   failure. The seed is stamped `2026-05-27T16:18Z` — more than a day later. Any
-   `--apply` run at that point would have been rejected.
-2. **Shape.** The script's manifest builder (:90-104) emits
-   `{name, category, url, hostname, account_id, source, auto_registered,
-   capabilities, metadata}` — no `chitty_id`, no `entity_type`, and **no
-   `endpoints` field at all**. The stub records carry object-shaped `endpoints`
-   and none of the script's always-set fields. Different schemas entirely.
+> **Step 7 — Backfill chittyregistry (29/29 registered via KV bypass)**
+>
+> "Gatekeeper rejected initial submissions (DB-error on first 9, rate-limit on
+> rest). Pivoted to direct KV write on the registry's REGISTRY_STORE namespace
+> `b4518a6db20640ea990099f6e8497771` using Global API Key. Wrote canonical key
+> format `tools:item:did:chitty:foundation:{name}` (item payload) +
+> `tools:by-subtype:service:did:chitty:foundation:{name}` (index pointer)."
 
-The `source: "cloudflare-inventory-2026-05-27"` string near the seed date is a
-coincidence, not evidence.
+Count (29/29), namespace, and date (2026-05-27) all match the seed cohort
+exactly. This was an **authorized operator action**, disclosed at the time — not
+an intrusion. There is no hostile party with KV write access, and the earlier
+framing of an "unidentified write vector" as a standing security risk is
+withdrawn.
 
-**The write vector is therefore UNKNOWN, not merely unattributed.** Something
-holds direct `REGISTRY_STORE` write access outside every application path. That
-is an open security question and it is the reason no data remediation should run
-before it is identified — a clean re-registration can be re-corrupted by the same
-vector, under real ChittyIDs and certs, raising blast radius rather than closing it.
+The DID-style key format also explains the missing `chitty_id`: records were
+keyed by `did:chitty:foundation:{name}` and the bodies simply never carried a
+ChittyID field.
+
+`scripts/registry-backfill-from-cf-inventory.sh` was separately suspected and is
+ruled out: commit `030f6a1` (2026-05-26 14:31) added the `chitty_id`-required
+validation a day before the seed, and the script emits no `endpoints` field at
+all, so its payload shape cannot produce these records.
+
+### The actual root cause, still open
+
+That same report lists three operator follow-ups that were never done. The first
+is the root cause of this entire audit:
+
+> 1. Investigate Gatekeeper "Database operation failed" at
+>    `register.chitty.cc/api/v1/register` so future registrations don't need KV bypass
+> 2. Raise rate-limit ceiling for bulk operations
+> 3. The 29 backfilled entries used auto-derived descriptions — refine per service
+
+The bypass happened because the front door was broken under bulk load. Until
+item 1 is resolved, any future bulk registration has the same incentive to
+bypass again.
 
 ## Correction: the registration flow is mint-inside-register
 
