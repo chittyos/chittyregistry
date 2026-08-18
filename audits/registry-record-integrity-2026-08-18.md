@@ -252,3 +252,78 @@ class* that produced the 29 stubs — just through a different door. Do not do i
 4. Exclude loopback/private hosts from the sweep rather than scoring them.
 5. Fix the self-check 522 (skip own origin, or use a service binding).
 6. Only then triage the 5 × 530 as real deploy failures.
+
+---
+
+# RESOLVED 2026-08-18: the 29 split three ways, and most already have identities
+
+The gating question — "do these services already have canonical ChittyIDs, or
+must they be minted?" — is now answered from the authoritative source, and the
+answer is **most of them already do**.
+
+ChittyRegister exposes `GET /api/v1/compliance/{serviceName}`, unauthenticated,
+reading its Neon `chittyos-core` store directly. Queried for all 29 seed names.
+Full results: `audits/seed29-registration-reconciliation-2026-08-18.csv`.
+
+| | count |
+|---|---|
+| already registered in ChittyRegister (Neon), with a ChittyID | **13** |
+| not present at all | 16 |
+| of the 13 — `active` with a certificate | 10 |
+| of the 13 — `pending_cert`, no certificate | 3 |
+
+## This kills the "mint 29 new IDs" plan
+
+For 13 services, minting would have created a **second, competing identity** for
+a service that already has one. That is the identity-duplication failure the
+remediation plan was explicitly trying to avoid, and it would have been walked
+straight into.
+
+Correct action for those 13 is a **backfill of the existing ChittyID into
+registry KV** — not registration, not minting.
+
+## Correction: chittymint's ChittyID is real, not an example
+
+An earlier note in this audit warned against reading
+`chittymint/CHARTER.md:110-119` — `03-1-USA-0970-P-2603-0-54` — as chittymint's
+own identity, calling it a documented example `/mint` response.
+
+**That warning was wrong.** ChittyRegister returns exactly
+`03-1-USA-0970-P-2603-0-54` as chittymint's `chitty_id`. It is its real
+registered identity and the CHARTER is self-describing. The warning is withdrawn.
+
+(Note for whoever handles it: that ID carries entity_type **P**, while
+chittycommand, chittydlvr, and chittyledger are **T**. Whether a minting service
+is canonically a Person or a Thing is a governance question, not a data bug —
+but the inconsistency is real and lives in the authoritative store.)
+
+## Two ID formats coexist in the authoritative store
+
+| format | count | example |
+|---|---|---|
+| legacy `did:chitty:REG-*` | 9 | `did:chitty:REG-XE65QU` (chittyauth) |
+| canonical `VV-G-LLL-SSSS-T-YYMM-C-XX` | 4 | `03-1-USA-9002-T-2602-0-81` (chittyledger) |
+
+ChittyRegister's own Neon store holds both. Any backfill must decide whether to
+carry the legacy DIDs across as-is or migrate them — carrying them across
+propagates the inconsistency into a second store.
+
+## The trust anchors that are genuinely absent
+
+`chittyid`, `chittycert`, and `chittygov` are **not** in ChittyRegister. This is
+consistent with their own repos: `chittyid/AGENTS.md` and `chittycert/AGENTS.md`
+both self-declare `service_chittyid: "TBD-pending-canonical-mint"`. Those really
+do need first-time registration — the headline claim holds for them.
+
+## Revised remediation
+
+1. **Backfill 13** existing ChittyIDs from ChittyRegister into registry KV.
+   No minting. Resolve the DID-vs-canonical format question first.
+2. **Complete certification** for the 3 `pending_cert` records
+   (chittycommand, chittydlvr, chittymint).
+3. **Register 16** genuinely-absent services through the Gatekeeper — the only
+   group where the original "re-register properly" plan applies unchanged.
+4. **Fix the Gatekeeper before step 3.** Follow-up #1 from the 2026-05-27 report
+   was never done. Note that the Gatekeeper demonstrably worked for these 13 at
+   some point, so it is not universally broken — the 2026-05-27 failure was
+   load- or data-shaped, which is what needs diagnosing.
