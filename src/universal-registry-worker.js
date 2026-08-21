@@ -866,6 +866,8 @@ async function runHealthSweep(env) {
   const skipCounts = {};
   let skippedTotal = 0;
   const cleared = [];
+  const clearFailures = [];
+  let clearedTotal = 0;
   // Skipping a record means we stop writing to it — which silently freezes
   // whatever health value it last had. For a record we skip BECAUSE the old
   // value was wrong (a loopback host we could never reach, our own origin
@@ -891,8 +893,19 @@ async function runHealthSweep(env) {
       last_health_check: new Date().toISOString(),
       last_health_error: reason,
     };
-    await env.REGISTRY_STORE.put(`tools:item:${tool.chitty_id}`, JSON.stringify(updated));
-    cleared.push({ name: tool.name ?? null, chitty_id: tool.chitty_id, reason });
+    // A failed clear must not abort the sweep. This write is housekeeping on a
+    // record we have already decided not to probe; letting it throw would
+    // propagate out of the for-of loop and cost every remaining service its
+    // health check for this run. Record the failure and carry on.
+    try {
+      await env.REGISTRY_STORE.put(`tools:item:${tool.chitty_id}`, JSON.stringify(updated));
+      if (cleared.length < SKIP_DETAIL_CAP) {
+        cleared.push({ name: tool.name ?? null, chitty_id: tool.chitty_id, reason });
+      }
+      clearedTotal++;
+    } catch (e) {
+      clearFailures.push({ name: tool.name ?? null, error: e.message });
+    }
   };
   for (const tool of tools) {
     // A record with no chitty_id would serialize its KV key as
@@ -966,7 +979,9 @@ async function runHealthSweep(env) {
     skipped_by_reason: skipCounts,
     skipped,
     skipped_detail_truncated: skippedTotal > skipped.length,
+    cleared_stale_count: clearedTotal,
     cleared_stale: cleared,
+    clear_failures: clearFailures,
     results,
   };
 }
