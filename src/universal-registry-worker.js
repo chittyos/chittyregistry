@@ -868,6 +868,7 @@ async function runHealthSweep(env) {
   const cleared = [];
   const clearFailures = [];
   let clearedTotal = 0;
+  let clearFailuresTotal = 0;
   // Skipping a record means we stop writing to it — which silently freezes
   // whatever health value it last had. For a record we skip BECAUSE the old
   // value was wrong (a loopback host we could never reach, our own origin
@@ -904,7 +905,10 @@ async function runHealthSweep(env) {
       }
       clearedTotal++;
     } catch (e) {
-      clearFailures.push({ name: tool.name ?? null, error: e.message });
+      clearFailuresTotal++;
+      if (clearFailures.length < SKIP_DETAIL_CAP) {
+        clearFailures.push({ name: tool.name ?? null, error: e.message });
+      }
     }
   };
   for (const tool of tools) {
@@ -981,6 +985,7 @@ async function runHealthSweep(env) {
     skipped_detail_truncated: skippedTotal > skipped.length,
     cleared_stale_count: clearedTotal,
     cleared_stale: cleared,
+    clear_failures_count: clearFailuresTotal,
     clear_failures: clearFailures,
     results,
   };
