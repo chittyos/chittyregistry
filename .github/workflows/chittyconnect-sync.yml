@@ -55,7 +55,7 @@ jobs:
           # runs reported success while every one of them 401'd and synced nothing.
           # A sync that did not happen must not look like a sync that did.
           if ! status="$(curl -sS -o "${body_file}" -w '%{http_code}' \
-                --max-time 30 --retry 2 --retry-connrefused \
+                --max-time 30 --retry 2 --retry-connrefused --retry-max-time 90 \
                 -X POST "${CHITTYCONNECT_ENDPOINT}/api/github/sync" \
                 -H "Authorization: Bearer ${key}" \
                 -H "Content-Type: application/json" \
@@ -65,10 +65,19 @@ jobs:
           fi
 
           echo "HTTP ${status}"
+
+          # The response body is attacker-influenceable output being printed into a
+          # runner log, where ::workflow commands:: are interpreted. Without this
+          # guard a body containing ::error:: or ::add-mask:: would be executed as a
+          # workflow command rather than displayed. Stop command processing around
+          # the echo, keyed by a random token so the body cannot re-enable it.
+          tok="$(uuidgen)"
+          echo "::stop-commands::${tok}"
           # GitHub masks registered secrets in logs automatically; the sed is defence
           # in depth in case the endpoint reflects the header in a transformed form.
           sed -e 's/Bearer [A-Za-z0-9._-]*/Bearer [REDACTED]/g' "${body_file}" | head -c 2000 || true
           echo
+          echo "::${tok}::"
 
           if [[ ! "${status}" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error title=ChittyConnect sync failed::POST /api/github/sync returned HTTP ${status}"
