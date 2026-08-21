@@ -15,8 +15,39 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Sync to ChittyConnect
+        env:
+          # connect.chitty.cc/api/github/sync answers an unauthenticated POST with
+          # 401 {"error":"Missing API key"} — it wants an API key. This previously
+          # read CHITTYCONNECT_SERVICE_TOKEN, which is not provisioned on this repo
+          # and is not on .github/allowed-workflow-secrets.txt. CHITTYCONNECT_API_KEY
+          # is the allowlisted name and matches what the endpoint asks for.
+          CHITTYCONNECT_API_KEY: ${{ secrets.CHITTYCONNECT_API_KEY }}
         run: |
-          curl -X POST "${{ env.CHITTYCONNECT_ENDPOINT }}/api/github/sync" \
-            -H "Authorization: Bearer ${{ secrets.CHITTYCONNECT_SERVICE_TOKEN }}" \
+          set -euo pipefail
+
+          # Absent credential is a real state, not a success. Say so and stop.
+          if [[ -z "${CHITTYCONNECT_API_KEY}" ]]; then
+            echo "::warning title=ChittyConnect sync skipped::CHITTYCONNECT_API_KEY is not configured on this repository, so no sync was performed. Provision it via the ChittyConnect broker to enable this job."
+            exit 0
+          fi
+
+          # No `|| true`. The previous version swallowed every failure, so 100/100
+          # runs reported success while every one of them 401'd and synced nothing.
+          # A sync that does not happen must not look like a sync that did.
+          status="$(curl -sS -o /tmp/sync-body.txt -w '%{http_code}' \
+            --max-time 30 \
+            -X POST "${CHITTYCONNECT_ENDPOINT}/api/github/sync" \
+            -H "Authorization: Bearer ${CHITTYCONNECT_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{"repository":"${{ github.repository }}","commit":"${{ github.sha }}"}' || true
+            -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"commit\":\"${GITHUB_SHA}\"}")"
+
+          echo "HTTP ${status}"
+          # Body may echo request detail but never the Authorization header.
+          head -c 2000 /tmp/sync-body.txt || true
+          echo
+
+          if [[ "${status}" -lt 200 || "${status}" -ge 300 ]]; then
+            echo "::error title=ChittyConnect sync failed::POST /api/github/sync returned HTTP ${status}"
+            exit 1
+          fi
+          echo "Sync accepted."
