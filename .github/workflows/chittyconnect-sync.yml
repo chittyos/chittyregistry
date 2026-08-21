@@ -9,11 +9,15 @@ on:
   workflow_dispatch:
 env:
   CHITTYCONNECT_ENDPOINT: https://connect.chitty.cc
+permissions:
+  contents: read
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      # No actions/checkout — this job posts two GitHub-provided values and never
+      # reads the repository. Checking out PR head put untrusted code on a runner
+      # that holds a credential, for no benefit.
       - name: Sync to ChittyConnect
         env:
           # connect.chitty.cc/api/github/sync answers an unauthenticated POST with
@@ -25,29 +29,49 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Absent credential is a real state, not a success. Say so and stop.
-          if [[ -z "${CHITTYCONNECT_API_KEY}" ]]; then
-            echo "::warning title=ChittyConnect sync skipped::CHITTYCONNECT_API_KEY is not configured on this repository, so no sync was performed. Provision it via the ChittyConnect broker to enable this job."
+          key="$(printf '%s' "${CHITTYCONNECT_API_KEY:-}" | tr -d '[:space:]')"
+
+          # An absent credential is a real state, not a success. Exit 0 rather than 1
+          # deliberately: this is an optional outbound sync, not a gate on the code,
+          # and failing the build forever on an unprovisioned integration is exactly
+          # the ignored-permanently-red-check disease this branch is curing. It is
+          # made loud instead — annotation plus job summary, both visible in the PR.
+          if [[ -z "${key}" ]]; then
+            msg="CHITTYCONNECT_API_KEY is not configured on this repository. No sync was performed. Provision it via the ChittyConnect broker to enable this job."
+            echo "::warning title=ChittyConnect sync SKIPPED::${msg}"
+            echo "### ChittyConnect sync skipped" >> "${GITHUB_STEP_SUMMARY}"
+            echo "${msg}" >> "${GITHUB_STEP_SUMMARY}"
             exit 0
           fi
 
+          body_file="$(mktemp)"
+          trap 'rm -f "${body_file}"' EXIT
+
+          # jq builds the JSON so the values are escaped rather than interpolated.
+          payload="$(jq -nc --arg repo "${GITHUB_REPOSITORY}" --arg sha "${GITHUB_SHA}" \
+            '{repository:$repo, commit:$sha}')"
+
           # No `|| true`. The previous version swallowed every failure, so 100/100
           # runs reported success while every one of them 401'd and synced nothing.
-          # A sync that does not happen must not look like a sync that did.
-          status="$(curl -sS -o /tmp/sync-body.txt -w '%{http_code}' \
-            --max-time 30 \
-            -X POST "${CHITTYCONNECT_ENDPOINT}/api/github/sync" \
-            -H "Authorization: Bearer ${CHITTYCONNECT_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"commit\":\"${GITHUB_SHA}\"}")"
+          # A sync that did not happen must not look like a sync that did.
+          if ! status="$(curl -sS -o "${body_file}" -w '%{http_code}' \
+                --max-time 30 --retry 2 --retry-connrefused \
+                -X POST "${CHITTYCONNECT_ENDPOINT}/api/github/sync" \
+                -H "Authorization: Bearer ${key}" \
+                -H "Content-Type: application/json" \
+                --data-raw "${payload}" 2>&1)"; then
+            echo "::error title=ChittyConnect sync failed::curl could not complete the request (DNS, TLS, or timeout)."
+            exit 1
+          fi
 
           echo "HTTP ${status}"
-          # Body may echo request detail but never the Authorization header.
-          head -c 2000 /tmp/sync-body.txt || true
+          # GitHub masks registered secrets in logs automatically; the sed is defence
+          # in depth in case the endpoint reflects the header in a transformed form.
+          sed -e 's/Bearer [A-Za-z0-9._-]*/Bearer [REDACTED]/g' "${body_file}" | head -c 2000 || true
           echo
 
-          if [[ "${status}" -lt 200 || "${status}" -ge 300 ]]; then
+          if [[ ! "${status}" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error title=ChittyConnect sync failed::POST /api/github/sync returned HTTP ${status}"
             exit 1
           fi
-          echo "Sync accepted."
+          echo "Sync accepted (HTTP ${status})."
