@@ -9,14 +9,78 @@ on:
   workflow_dispatch:
 env:
   CHITTYCONNECT_ENDPOINT: https://connect.chitty.cc
+permissions:
+  contents: read
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      # No actions/checkout — this job posts two GitHub-provided values and never
+      # reads the repository. Checking out PR head put untrusted code on a runner
+      # that holds a credential, for no benefit.
       - name: Sync to ChittyConnect
+        env:
+          # connect.chitty.cc/api/github/sync answers an unauthenticated POST with
+          # 401 {"error":"Missing API key"} — it wants an API key. This previously
+          # read CHITTYCONNECT_SERVICE_TOKEN, which is not provisioned on this repo
+          # and is not on .github/allowed-workflow-secrets.txt. CHITTYCONNECT_API_KEY
+          # is the allowlisted name and matches what the endpoint asks for.
+          CHITTYCONNECT_API_KEY: ${{ secrets.CHITTYCONNECT_API_KEY }}
         run: |
-          curl -X POST "${{ env.CHITTYCONNECT_ENDPOINT }}/api/github/sync" \
-            -H "Authorization: Bearer ${{ secrets.CHITTYCONNECT_SERVICE_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"repository":"${{ github.repository }}","commit":"${{ github.sha }}"}' || true
+          set -euo pipefail
+
+          key="$(printf '%s' "${CHITTYCONNECT_API_KEY:-}" | tr -d '[:space:]')"
+
+          # An absent credential is a real state, not a success. Exit 0 rather than 1
+          # deliberately: this is an optional outbound sync, not a gate on the code,
+          # and failing the build forever on an unprovisioned integration is exactly
+          # the ignored-permanently-red-check disease this branch is curing. It is
+          # made loud instead — annotation plus job summary, both visible in the PR.
+          if [[ -z "${key}" ]]; then
+            msg="CHITTYCONNECT_API_KEY is not configured on this repository. No sync was performed. Provision it via the ChittyConnect broker to enable this job."
+            echo "::warning title=ChittyConnect sync SKIPPED::${msg}"
+            echo "### ChittyConnect sync skipped" >> "${GITHUB_STEP_SUMMARY}"
+            echo "${msg}" >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          body_file="$(mktemp)"
+          trap 'rm -f "${body_file}"' EXIT
+
+          # jq builds the JSON so the values are escaped rather than interpolated.
+          payload="$(jq -nc --arg repo "${GITHUB_REPOSITORY}" --arg sha "${GITHUB_SHA}" \
+            '{repository:$repo, commit:$sha}')"
+
+          # No `|| true`. The previous version swallowed every failure, so 100/100
+          # runs reported success while every one of them 401'd and synced nothing.
+          # A sync that did not happen must not look like a sync that did.
+          if ! status="$(curl -sS -o "${body_file}" -w '%{http_code}' \
+                --max-time 30 --retry 2 --retry-connrefused --retry-max-time 90 \
+                -X POST "${CHITTYCONNECT_ENDPOINT}/api/github/sync" \
+                -H "Authorization: Bearer ${key}" \
+                -H "Content-Type: application/json" \
+                --data-raw "${payload}" 2>&1)"; then
+            echo "::error title=ChittyConnect sync failed::curl could not complete the request (DNS, TLS, or timeout)."
+            exit 1
+          fi
+
+          echo "HTTP ${status}"
+
+          # The response body is attacker-influenceable output being printed into a
+          # runner log, where ::workflow commands:: are interpreted. Without this
+          # guard a body containing ::error:: or ::add-mask:: would be executed as a
+          # workflow command rather than displayed. Stop command processing around
+          # the echo, keyed by a random token so the body cannot re-enable it.
+          tok="$(uuidgen)"
+          echo "::stop-commands::${tok}"
+          # GitHub masks registered secrets in logs automatically; the sed is defence
+          # in depth in case the endpoint reflects the header in a transformed form.
+          sed -e 's/Bearer [A-Za-z0-9._-]*/Bearer [REDACTED]/g' "${body_file}" | head -c 2000 || true
+          echo
+          echo "::${tok}::"
+
+          if [[ ! "${status}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error title=ChittyConnect sync failed::POST /api/github/sync returned HTTP ${status}"
+            exit 1
+          fi
+          echo "Sync accepted (HTTP ${status})."
