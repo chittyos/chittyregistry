@@ -865,24 +865,63 @@ async function runHealthSweep(env) {
   const skipped = [];
   const skipCounts = {};
   let skippedTotal = 0;
-  const skip = (tool, reason) => {
+  const cleared = [];
+  const clearFailures = [];
+  let clearedTotal = 0;
+  let clearFailuresTotal = 0;
+  // Skipping a record means we stop writing to it — which silently freezes
+  // whatever health value it last had. For a record we skip BECAUSE the old
+  // value was wrong (a loopback host we could never reach, our own origin
+  // 522ing), that leaves the false reading published forever, with a stale
+  // last_health_check and nothing marking it as no longer maintained.
+  //
+  // So for policy exclusions on records that are otherwise well-formed, replace
+  // the stale reading with an explicit "excluded" state instead of abandoning
+  // it. Only reasons listed here write; the rest must not, because a record
+  // without a usable chitty_id has no safe key to write to.
+  const CLEAR_STALE_ON = new Set(["loopback_or_private_host", "self_origin"]);
+  const skip = async (tool, reason) => {
     skippedTotal++;
     skipCounts[reason] = (skipCounts[reason] ?? 0) + 1;
     if (skipped.length < SKIP_DETAIL_CAP) {
       skipped.push({ name: tool.name ?? null, chitty_id: tool.chitty_id ?? null, reason });
+    }
+    if (!tool.chitty_id || !CLEAR_STALE_ON.has(reason)) return;
+    if (tool.health === "excluded" && tool.last_health_error === reason) return; // already clean
+    const updated = {
+      ...tool,
+      health: "excluded",
+      last_health_check: new Date().toISOString(),
+      last_health_error: reason,
+    };
+    // A failed clear must not abort the sweep. This write is housekeeping on a
+    // record we have already decided not to probe; letting it throw would
+    // propagate out of the for-of loop and cost every remaining service its
+    // health check for this run. Record the failure and carry on.
+    try {
+      await env.REGISTRY_STORE.put(`tools:item:${tool.chitty_id}`, JSON.stringify(updated));
+      if (cleared.length < SKIP_DETAIL_CAP) {
+        cleared.push({ name: tool.name ?? null, chitty_id: tool.chitty_id, reason });
+      }
+      clearedTotal++;
+    } catch (e) {
+      clearFailuresTotal++;
+      if (clearFailures.length < SKIP_DETAIL_CAP) {
+        clearFailures.push({ name: tool.name ?? null, error: e.message });
+      }
     }
   };
   for (const tool of tools) {
     // A record with no chitty_id would serialize its KV key as
     // `tools:item:undefined`, collapsing every such record onto one key.
     // Skip before any write path can reach it.
-    if (!tool.chitty_id) { skip(tool, "missing_chitty_id"); continue; }
-    if (tool.entity_type !== "T") { skip(tool, "entity_type_not_T"); continue; }
-    if (!["service", "mcp-server"].includes(tool.subtype)) { skip(tool, "subtype_not_swept"); continue; }
+    if (!tool.chitty_id) { await skip(tool, "missing_chitty_id"); continue; }
+    if (tool.entity_type !== "T") { await skip(tool, "entity_type_not_T"); continue; }
+    if (!["service", "mcp-server"].includes(tool.subtype)) { await skip(tool, "subtype_not_swept"); continue; }
     const healthUrl = pickHealthUrl(tool);
-    if (!healthUrl) { skip(tool, "no_resolvable_health_url"); continue; }
-    if (isUnsweepableHost(healthUrl)) { skip(tool, "loopback_or_private_host"); continue; }
-    if (isOwnOrigin(healthUrl, env)) { skip(tool, "self_origin"); continue; }
+    if (!healthUrl) { await skip(tool, "no_resolvable_health_url"); continue; }
+    if (isUnsweepableHost(healthUrl)) { await skip(tool, "loopback_or_private_host"); continue; }
+    if (isOwnOrigin(healthUrl, env)) { await skip(tool, "self_origin"); continue; }
     let health = "unknown";
     let error = null;
     try {
@@ -944,6 +983,10 @@ async function runHealthSweep(env) {
     skipped_by_reason: skipCounts,
     skipped,
     skipped_detail_truncated: skippedTotal > skipped.length,
+    cleared_stale_count: clearedTotal,
+    cleared_stale: cleared,
+    clear_failures_count: clearFailuresTotal,
+    clear_failures: clearFailures,
     results,
   };
 }
