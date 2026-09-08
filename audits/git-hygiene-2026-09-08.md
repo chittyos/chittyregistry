@@ -96,43 +96,104 @@ Scratch output, not a missing commit. Recommend delete.
 
 ---
 
-## Correction + blocker found while closing out the sweep
+## Closing out: three corrections and a new finding
 
-**Correction to the dependabot section above.** I wrote that the 8 stale PRs "fail on
-merit." That was true when measured — #187 was `MERGEABLE/CLEAN` with 12 passing checks
-while the others failed — but it is no longer the whole story. A **repo-wide**
-`gates / dependency-audit` failure has since appeared and now fails on *every* open PR,
-including a docs-only one that changes no dependencies. Do not read the current red
-checkmarks as evidence about the individual PRs.
+### 1. The dependabot backlog splits cleanly in two
 
-**The gate fails against `main`'s own dependency tree.** `npm audit --audit-level=high`
-on a clean checkout of `main` reports 4 high-severity vulnerabilities:
+I wrote above that the 8 stale PRs "fail on merit." After `@dependabot recreate` rebased
+them onto current `main`, the picture resolves — and it is two distinct groups, not one:
+
+| PRs | Failing checks | Read |
+|---|---|---|
+| #177, #189, #191 | `gates / dependency-audit` only | blocked purely on the shared gate |
+| #176, #178, #179, #180 | `gates / dependency-audit` + `dependabot` | same, plus the auto-merge job |
+| **#123, #149** | **7 distinct checks** — Lint and Type Check, Validate Dependencies, Test Configuration Files, Security Audit, Integration Test (Mock), Validate Documentation, and the shared gate | **genuinely broken on their own** |
+
+#123 and #149 bump `actions/checkout` 6→7 and `actions/setup-node` 6→7 — major action
+bumps that break six jobs beyond the shared gate. They are real work, not gate noise.
+Recreate did clear their earlier `CONFLICTING/DIRTY` state; the failures are what remain.
+
+Everything else drains the moment the gate decision below lands.
+
+### 2. The failing gate is org-owned — but the fix is local and already precedented
+
+This repo's `governance-gates.yml` is a 3-line shim delegating to
+`CHITTYOS/chittycommand/.github/workflows/reusable-governance-gates.yml@main`. The failing
+step is:
+
+```yaml
+- name: Dependency Audit (High+)
+  run: npm audit --audit-level=high ${{ inputs.audit_omit_dev && '--omit=dev' || '' }}
+```
+
+**The reusable workflow already exposes an `audit_omit_dev` input** (default `false`), and
+**`chittycommand` — the repo that owns the gate — sets it `true` for itself.** So scoping
+the audit to shipped dependencies is a two-line `with:` block here, matching what the
+gate's own author already does. Not an org-level change.
+
+(Note: the `npm audit` in this repo's `test-sync-daemon.yml` is `|| true` and cannot fail —
+it is not the source of the red check.)
+
+### 3. The vulnerability itself — do not "fix" it
+
+`npm audit --audit-level=high` fails against `main`'s own tree with 4 high-severity
+findings:
 
 | Package | Path | Fix npm proposes |
 |---|---|---|
-| `js-yaml` | direct | genuine, non-major — Dependabot already opened #189 / #191 |
+| `js-yaml` | direct | genuine, non-major — Dependabot opened #189 / #191 |
 | `sharp` | `wrangler → miniflare → sharp` | `wrangler@4.15.2` |
 | `miniflare` | `wrangler → miniflare` | `wrangler@4.15.2` |
 | `wrangler` | direct devDependency | `wrangler@4.15.2` |
 
-**Do not run `npm audit fix --force` here.** Installed `wrangler` is `^4.120.0`. The
-advisory range is `<=0.0.0-7ae5dd357 || >=4.16.0`, i.e. everything from 4.16.0 upward is
-flagged, so npm's "fix" is a **downgrade of ~105 minor versions** to 4.15.2 — which it
-correctly labels `isSemVerMajor`. That would break the build to satisfy a scanner.
+**Do not run `npm audit fix --force`.** Installed `wrangler` is `^4.120.0`; the advisory
+range is `<=0.0.0-7ae5dd357 || >=4.16.0`, so npm's "fix" is a downgrade of ~105 minor
+versions, which it correctly labels `isSemVerMajor`. That breaks the build to satisfy a
+scanner. The CVEs (`GHSA-g89c-p67h-r497`, `GHSA-2jg2-4ch7-h545`) are in libheif via
+`sharp`, reached only through `miniflare` — devDependency tooling for local Workers
+emulation that never reaches the deployed Worker.
 
-The underlying CVEs (`GHSA-g89c-p67h-r497`, `GHSA-2jg2-4ch7-h545`) are in **libheif via
-`sharp`**, reached only through `miniflare`, which is a devDependency used for local
-Workers emulation. None of it ships to the deployed Worker runtime.
+Recommendation: set `audit_omit_dev: true` (option 2 above), and merge js-yaml separately —
+that one is real and cheap. Left for the operator: it is a CI-policy call, not housekeeping.
 
-Two defensible resolutions, both policy calls rather than hygiene:
+### 4. NEW — PR #188 should not be merged as written
 
-1. **Scope the gate to what ships** — `npm audit --omit=dev --audit-level=high`. Honest
-   about the actual attack surface; stops the gate reporting on tooling that never
-   reaches production.
-2. **Record a dated advisory exception** for the two `sharp`/libheif GHSAs while keeping
-   dev deps in scope, so the gate keeps its teeth everywhere else.
+I opened #188 during this sweep for the previously-unrouted `feat/chittysecrets-migration`
+branch, predicting one conflict. **That understated it, and the branch has a worse problem
+than conflicts.**
 
-Merge `js-yaml` (#189/#191) either way — that one is a real, cheap fix.
+`main` has already deleted the entire 1Password lane. `git merge-tree` reports **three**
+conflicts, all delete-side:
 
-Left for the operator: this is a CI-policy decision with a real trade-off, not
-housekeeping, and nothing merges cleanly until it is made.
+- `.1password/environments.toml → .chittysecrets/environments.toml` — rename/delete; main
+  deleted the file outright
+- `.github/workflows/deploy-worker.yml` — modify/delete
+- `.github/workflows/onepassword-rotation-audit.yml` — modify/delete
+
+So the migration branch renames files that main has since removed entirely. It is
+**superseded**, not merely stale.
+
+**More seriously, its remaining non-conflicting content is a blind find/replace of
+"1Password" → "chittysecrets" across four historical audit documents**, which corrupts
+them:
+
+- `chittyconnect-1password` → `chittyconnect-chittysecrets` — **falsifies the name of a
+  live Cloudflare tunnel** in an infrastructure inventory
+- `1password-connect` → `chittysecrets-connect` — same, in the cfargotunnel list
+- "provisioned in 1Password `ChittyOS-Core` vault" → "provisioned in chittysecrets
+  `ChittyOS-Core` vault" — a 1Password vault name attributed to the wrong system
+- "the 1Password Desktop app" → "the chittysecrets Desktop app" — no such application
+- "1Password item-create is environmentally impossible" → describes `op item create`
+
+These are **records of what happened on 2026-05-27**, when 1Password *was* the authority.
+Correcting a doc that still asserts current policy is right; rewriting history so a past
+event reads as having used a system that did not yet hold that role makes the audit lie —
+and renaming live infrastructure in an inventory makes it actively misleading.
+
+`.chittyconnect.yml` is also left half-migrated: `vault:` becomes `chittysecrets` while
+`paths.production` keeps the `op://ChittyOS/chittyregistry-prod` URI.
+
+Recommendation: **close #188 without merging.** The workflow/config half is obsolete
+(main deleted those files) and the docs half is damaging. If any of it is wanted, it is a
+fresh, hand-written change to `.chittyconnect.yml` only. I have flagged this on the PR
+rather than closing it, since I opened it on your instruction.
