@@ -93,3 +93,46 @@ that does not exist. Close as obsolete; do not merge, do not rebase.
 the repo (the two `schema.json` hits are the unrelated MCP `server.schema.json` URL). It
 describes a 3-field health-response shape that the worker does not validate against.
 Scratch output, not a missing commit. Recommend delete.
+
+---
+
+## Correction + blocker found while closing out the sweep
+
+**Correction to the dependabot section above.** I wrote that the 8 stale PRs "fail on
+merit." That was true when measured — #187 was `MERGEABLE/CLEAN` with 12 passing checks
+while the others failed — but it is no longer the whole story. A **repo-wide**
+`gates / dependency-audit` failure has since appeared and now fails on *every* open PR,
+including a docs-only one that changes no dependencies. Do not read the current red
+checkmarks as evidence about the individual PRs.
+
+**The gate fails against `main`'s own dependency tree.** `npm audit --audit-level=high`
+on a clean checkout of `main` reports 4 high-severity vulnerabilities:
+
+| Package | Path | Fix npm proposes |
+|---|---|---|
+| `js-yaml` | direct | genuine, non-major — Dependabot already opened #189 / #191 |
+| `sharp` | `wrangler → miniflare → sharp` | `wrangler@4.15.2` |
+| `miniflare` | `wrangler → miniflare` | `wrangler@4.15.2` |
+| `wrangler` | direct devDependency | `wrangler@4.15.2` |
+
+**Do not run `npm audit fix --force` here.** Installed `wrangler` is `^4.120.0`. The
+advisory range is `<=0.0.0-7ae5dd357 || >=4.16.0`, i.e. everything from 4.16.0 upward is
+flagged, so npm's "fix" is a **downgrade of ~105 minor versions** to 4.15.2 — which it
+correctly labels `isSemVerMajor`. That would break the build to satisfy a scanner.
+
+The underlying CVEs (`GHSA-g89c-p67h-r497`, `GHSA-2jg2-4ch7-h545`) are in **libheif via
+`sharp`**, reached only through `miniflare`, which is a devDependency used for local
+Workers emulation. None of it ships to the deployed Worker runtime.
+
+Two defensible resolutions, both policy calls rather than hygiene:
+
+1. **Scope the gate to what ships** — `npm audit --omit=dev --audit-level=high`. Honest
+   about the actual attack surface; stops the gate reporting on tooling that never
+   reaches production.
+2. **Record a dated advisory exception** for the two `sharp`/libheif GHSAs while keeping
+   dev deps in scope, so the gate keeps its teeth everywhere else.
+
+Merge `js-yaml` (#189/#191) either way — that one is a real, cheap fix.
+
+Left for the operator: this is a CI-policy decision with a real trade-off, not
+housekeeping, and nothing merges cleanly until it is made.
