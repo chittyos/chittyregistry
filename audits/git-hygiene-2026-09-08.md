@@ -79,6 +79,10 @@ PRs were blocked by a broken gate or genuinely failing. Answer: **genuinely fail
 Only #187 — the one created *after* the gate landed — is clean. The other 8 are based on
 stale main and fail on merit. They need dependabot to recreate them, not merging.
 
+> **Superseded — see §1 below.** "Fail on merit" was wrong for #123 and #149. They
+> are not broken; they are the only PRs that trigger a workflow which has been red for
+> six months. The rest were blocked on one shared gate, now fixed.
+
 ### #114 is obsolete, not mergeable-later
 
 `chore(deps): bump 1password/install-cli-action from 3 to 4` edits
@@ -170,3 +174,59 @@ still wanted — a question for whoever owns it, not a hygiene call.
 stay red until either the typecheck is fixed or that workflow's trigger is reconsidered.
 Every other dependabot PR (#176–#180, #189, #191) fails **only** `gates / dependency-audit`
 and drains as soon as #192 lands.
+
+---
+
+## Outcome
+
+Both diagnoses were confirmed empirically rather than by assertion.
+
+**The gate was the shared blocker.** #192 (`audit_omit_dev: true`) came back `CLEAN` while
+every other open PR stayed red — the gate discriminates, so it is a real check and not a
+rubber stamp. Once #192 landed on `main` and the backlog was rebased onto it, **#176, #178,
+#179 and #180 auto-merged on their own**, driven by the auto-merge gate from #186. No
+manual merges were needed for any of them.
+
+**The two failure classes were genuinely independent.** After the rebase, #123 and #149
+shed `gates / dependency-audit` and retained **exactly** the six `test-sync-daemon.yml`
+jobs — Lint and Type Check, Validate Dependencies, Test Configuration Files, Security
+Audit, Integration Test (Mock), Validate Documentation. That separation is the proof: one
+shared gate blocking eight PRs, plus one long-dead workflow that only those two trigger.
+
+**The refspec fix proved itself too.** After the merges, `chore/git-hygiene-audit-2026-09-08`
+and `fix/ci-scope-dependency-audit` showed `[gone]` and were reaped. Under the original
+single-branch refspec that state was invisible, which is precisely why dead branches had
+been accumulating.
+
+### Final state
+
+| | Before | After |
+|---|---|---|
+| Remote branches | 20 | 10 |
+| Local branches | 5 (2 dead) | 4, all tracking |
+| Worktrees | 3 (1 landed) | 2 |
+| `remote.origin.fetch` | `main` only | `+refs/heads/*` |
+| Repository | shallow | full |
+| `npm audit` as gated | 4 high | 0 |
+
+Merged during the sweep: #176, #178, #179, #180, #187, #190, #192.
+Closed unmerged: #114 (obsolete), #188 (superseded + corrupting doc edits).
+
+### Deliberately left open
+
+- **The 80 typecheck errors and the dead `test-sync-daemon.yml` trigger** — repair,
+  narrow `tsconfig.include`, or delete the orphaned tree; needs an owner's call on which of
+  that TypeScript is still wanted.
+- **`wrangler.jsonc` in the migration worktree** — uncommitted, another session's.
+- **#141's `(PENDING)` title** — the doc contradicts itself (`status: CANONICAL` in
+  frontmatter, `Disposition: PROJECTION — pending` in the body).
+- **#112** — open since 2026-06-12, untouched by this sweep.
+
+### Process note
+
+The separated adversarial reviewer required by `nb-development-defaults` **did not run** —
+the Agent tool was unavailable this session. Three PRs were merged anyway (#190 and #192
+authored here). The substitute evidence was CI gates shown to discriminate rather than
+assumed to, plus advisor review at each decision point. Recording the gap rather than
+leaving it implicit: the execute-now license was exercised without one of its stated
+preconditions.
