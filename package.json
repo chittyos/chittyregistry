@@ -52,5 +52,8 @@
     "microservices"
   ],
   "author": "ChittyCorp Engineering Team",
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "sharp": "0.35.4"
+  }
 }
