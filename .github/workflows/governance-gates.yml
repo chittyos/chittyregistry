@@ -8,4 +8,11 @@ on:
 jobs:
   gates:
     uses: CHITTYOS/chittycommand/.github/workflows/reusable-governance-gates.yml@main
+    # Scope the audit to dependencies that actually ship. The high-severity
+    # findings are libheif-via-sharp, reached only through miniflare — wrangler's
+    # local-emulation tooling, which never reaches the deployed Worker. npm's
+    # proposed "fix" is wrangler@4.15.2, a ~105-minor downgrade from ^4.120.0.
+    # chittycommand, which owns this reusable workflow, sets the same flag.
+    with:
+      audit_omit_dev: true
     secrets: inherit
