@@ -498,20 +498,34 @@ export default {
         return jsonResponse(formatMcpRegistryEntry(server), 200, corsHeaders);
       }
 
-      // POST /v0.1/servers — register a new MCP server (auth required)
+      // POST /v0.1/servers — register a new MCP server (auth required).
+      //
+      // Accepts either of the write paths documented at the top of this file: a
+      // Cloudflare service binding from chittyregister, or the admin token. The
+      // upstream write guard already admits binding calls, so requiring the token
+      // here as well made this route stricter than the stated policy and stricter
+      // than its sibling /internal/upsert — chittyregister's MCP discovery bridge
+      // calls over the binding with no token by design, so every mcp-server
+      // registration 401'd and silently degraded to discovery_ref.status="pending".
       if (path === "/v0.1/servers" && request.method === "POST") {
-        const adminToken = env.MCP_REGISTRY_ADMIN_TOKEN;
-        const authHeader = request.headers.get("Authorization") || "";
-        const bearerToken = authHeader.startsWith("Bearer ")
-          ? authHeader.slice(7).trim()
-          : "";
+        const isServiceBinding =
+          !request.headers.get("CF-Connecting-IP") &&
+          request.headers.get("X-Chitty-Internal-Binding") === "chittyregister";
 
-        if (!adminToken || bearerToken !== adminToken) {
-          return jsonResponse(
-            { error: "Unauthorized registry mutation" },
-            401,
-            corsHeaders,
-          );
+        if (!isServiceBinding) {
+          const adminToken = env.MCP_REGISTRY_ADMIN_TOKEN;
+          const authHeader = request.headers.get("Authorization") || "";
+          const bearerToken = authHeader.startsWith("Bearer ")
+            ? authHeader.slice(7).trim()
+            : "";
+
+          if (!adminToken || bearerToken !== adminToken) {
+            return jsonResponse(
+              { error: "Unauthorized registry mutation" },
+              401,
+              corsHeaders,
+            );
+          }
         }
 
         let serverData;
