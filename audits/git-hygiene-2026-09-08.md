@@ -97,103 +97,76 @@ Scratch output, not a missing commit. Recommend delete.
 ---
 
 ## Closing out: three corrections and a new finding
+### 1. The real finding: a CI check that has been red for six months and nobody saw it
 
-### 1. The dependabot backlog splits cleanly in two
+I first wrote that #123 and #149 "fail on merit — real work, not gate noise." **That was
+wrong, and the truth is worse.** They are not broken. They are the only PRs in months that
+happen to trigger a workflow which has failed **every single time it has ever run.**
 
-I wrote above that the 8 stale PRs "fail on merit." After `@dependabot recreate` rebased
-them onto current `main`, the picture resolves — and it is two distinct groups, not one:
-
-| PRs | Failing checks | Read |
-|---|---|---|
-| #177, #189, #191 | `gates / dependency-audit` only | blocked purely on the shared gate |
-| #176, #178, #179, #180 | `gates / dependency-audit` + `dependabot` | same, plus the auto-merge job |
-| **#123, #149** | **7 distinct checks** — Lint and Type Check, Validate Dependencies, Test Configuration Files, Security Audit, Integration Test (Mock), Validate Documentation, and the shared gate | **genuinely broken on their own** |
-
-#123 and #149 bump `actions/checkout` 6→7 and `actions/setup-node` 6→7 — major action
-bumps that break six jobs beyond the shared gate. They are real work, not gate noise.
-Recreate did clear their earlier `CONFLICTING/DIRTY` state; the failures are what remain.
-
-Everything else drains the moment the gate decision below lands.
-
-### 2. The failing gate is org-owned — but the fix is local and already precedented
-
-This repo's `governance-gates.yml` is a 3-line shim delegating to
-`CHITTYOS/chittycommand/.github/workflows/reusable-governance-gates.yml@main`. The failing
-step is:
+`test-sync-daemon.yml` carries this trigger:
 
 ```yaml
-- name: Dependency Audit (High+)
-  run: npm audit --audit-level=high ${{ inputs.audit_omit_dev && '--omit=dev' || '' }}
+on:
+  pull_request:
+    paths:
+      - 'src/services/NotionSyncService.ts'
+      - 'src/routes/notion-webhooks.ts'
+      - 'scripts/notion-*.ts'
+      - '.github/workflows/test-sync-daemon.yml'   # <-- the only path that ever fires
 ```
 
-**The reusable workflow already exposes an `audit_omit_dev` input** (default `false`), and
-**`chittycommand` — the repo that owns the gate — sets it `true` for itself.** So scoping
-the audit to shipped dependencies is a two-line `with:` block here, matching what the
-gate's own author already does. Not an org-level change.
+Its run history, most recent first:
 
-(Note: the `npm audit` in this repo's `test-sync-daemon.yml` is `|| true` and cannot fail —
-it is not the source of the red check.)
-
-### 3. The vulnerability itself — do not "fix" it
-
-`npm audit --audit-level=high` fails against `main`'s own tree with 4 high-severity
-findings:
-
-| Package | Path | Fix npm proposes |
+| Result | Date | Trigger |
 |---|---|---|
-| `js-yaml` | direct | genuine, non-major — Dependabot opened #189 / #191 |
-| `sharp` | `wrangler → miniflare → sharp` | `wrangler@4.15.2` |
-| `miniflare` | `wrangler → miniflare` | `wrangler@4.15.2` |
-| `wrangler` | direct devDependency | `wrangler@4.15.2` |
+| failure | 2026-09-08 | bump actions/checkout 6→7 |
+| failure | 2026-09-08 | bump actions/setup-node 6→7 |
+| failure | 2026-07-20 | bump actions/setup-node |
+| failure | 2026-07-18 | bump actions/checkout |
+| failure | 2026-06-28 | bump actions/checkout |
+| failure | 2026-06-22 | bump actions/checkout |
+| failure | 2026-03-09 | bump actions/checkout 4→6 |
+| failure | 2026-03-04 | bump actions/checkout 4→6 |
+| failure | 2026-03-04 | bump actions/setup-node 4→6 |
+| failure | 2026-03-02 | bump actions/checkout 4→6 |
 
-**Do not run `npm audit fix --force`.** Installed `wrangler` is `^4.120.0`; the advisory
-range is `<=0.0.0-7ae5dd357 || >=4.16.0`, so npm's "fix" is a downgrade of ~105 minor
-versions, which it correctly labels `isSemVerMajor`. That breaks the build to satisfy a
-scanner. The CVEs (`GHSA-g89c-p67h-r497`, `GHSA-2jg2-4ch7-h545`) are in libheif via
-`sharp`, reached only through `miniflare` — devDependency tooling for local Workers
-emulation that never reaches the deployed Worker.
+**10 of 10 failures, and every trigger is Dependabot editing the workflow file itself.**
+Not once in six months has it been fired by a change to `NotionSyncService.ts`,
+`notion-webhooks.ts`, or `scripts/notion-*.ts` — the code it exists to test.
 
-Recommendation: set `audit_omit_dev: true` (option 2 above), and merge js-yaml separately —
-that one is real and cheap. Left for the operator: it is a CI-policy call, not housekeeping.
+Its first job runs a **repo-wide** `npx tsc --noEmit`, which fails on `main` with
+**80 TypeScript errors across 15 files**:
 
-### 4. NEW — PR #188 should not be merged as written
+```
+19  src/mcp-agent-neon.ts          6  src/routes/registration.ts
+15  src/server.ts                  4  src/services/RegistryService copy.ts
+13  src/mcp-agent-authorized.ts    4  src/services/RedisService.ts
+                                   4  src/services/HealthMonitor.ts   ... +8 more files
+```
 
-I opened #188 during this sweep for the previously-unrouted `feat/chittysecrets-migration`
-branch, predicting one conflict. **That understated it, and the branch has a worse problem
-than conflicts.**
+This is the operator's own documented anti-pattern — *"a check you pay for and never
+receive"* — but arriving by a route the usual tells miss. There is no
+`continue-on-error: true` to grep for. The job is not masked; it is **scoped so narrowly
+that it effectively never runs**, which produces the same silence. (The one genuinely
+masked step is its `npx eslint ... || true`.)
 
-`main` has already deleted the entire 1Password lane. `git merge-tree` reports **three**
-conflicts, all delete-side:
+It survived because **`ci.yml` — the workflow that actually gates every PR — never
+typechecks at all.** It runs `eslint` and unit tests only. So `main` shows green
+indefinitely while `tsc` has been failing since at least March.
 
-- `.1password/environments.toml → .chittysecrets/environments.toml` — rename/delete; main
-  deleted the file outright
-- `.github/workflows/deploy-worker.yml` — modify/delete
-- `.github/workflows/onepassword-rotation-audit.yml` — modify/delete
+**Severity: broken check, not a production incident.** `wrangler.jsonc` sets
+`main: src/universal-registry-worker.js` and `package.json` has **no build script** — the
+deployed Worker is plain JavaScript. The 80-error TypeScript tree under `src/**/*.ts` is
+never compiled and never deployed. Which raises its own question: whether that tree is
+live code or an orphan. `src/services/RegistryService copy.ts` — a file literally named
+"copy", imported by nothing, contributing 4 of the errors — suggests at least part of it
+is the latter.
 
-So the migration branch renames files that main has since removed entirely. It is
-**superseded**, not merely stale.
+Not fixed here. Choosing between *repair the 80 errors*, *narrow `tsconfig.include` to
+what is real*, and *delete the orphaned tree* requires knowing which of that TypeScript is
+still wanted — a question for whoever owns it, not a hygiene call.
 
-**More seriously, its remaining non-conflicting content is a blind find/replace of
-"1Password" → "chittysecrets" across four historical audit documents**, which corrupts
-them:
-
-- `chittyconnect-1password` → `chittyconnect-chittysecrets` — **falsifies the name of a
-  live Cloudflare tunnel** in an infrastructure inventory
-- `1password-connect` → `chittysecrets-connect` — same, in the cfargotunnel list
-- "provisioned in 1Password `ChittyOS-Core` vault" → "provisioned in chittysecrets
-  `ChittyOS-Core` vault" — a 1Password vault name attributed to the wrong system
-- "the 1Password Desktop app" → "the chittysecrets Desktop app" — no such application
-- "1Password item-create is environmentally impossible" → describes `op item create`
-
-These are **records of what happened on 2026-05-27**, when 1Password *was* the authority.
-Correcting a doc that still asserts current policy is right; rewriting history so a past
-event reads as having used a system that did not yet hold that role makes the audit lie —
-and renaming live infrastructure in an inventory makes it actively misleading.
-
-`.chittyconnect.yml` is also left half-migrated: `vault:` becomes `chittysecrets` while
-`paths.production` keeps the `op://ChittyOS/chittyregistry-prod` URI.
-
-Recommendation: **close #188 without merging.** The workflow/config half is obsolete
-(main deleted those files) and the docs half is damaging. If any of it is wanted, it is a
-fresh, hand-written change to `.chittyconnect.yml` only. I have flagged this on the PR
-rather than closing it, since I opened it on your instruction.
+**What this means for the backlog:** #123 and #149 need no work of their own. They will
+stay red until either the typecheck is fixed or that workflow's trigger is reconsidered.
+Every other dependabot PR (#176–#180, #189, #191) fails **only** `gates / dependency-audit`
+and drains as soon as #192 lands.
