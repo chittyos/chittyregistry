@@ -32,11 +32,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: TypeScript compilation check
-        run: npx tsc --noEmit
+      # The repo-wide `tsc --noEmit` moved to ci.yml, which runs on every PR.
+      # Keeping it here meant the only typecheck in the repo was gated behind
+      # this workflow's Notion-specific paths filter.
 
+      # `scripts/**/*.ts` is dropped: eslint.config.js ignores `scripts/**`, so
+      # passing that glob made eslint exit 2 ("no matching configuration") every
+      # run — which the trailing `|| true` then swallowed. The mask is removed
+      # now that the command can actually succeed or fail on merit.
       - name: Lint sync daemon code
-        run: npx eslint "src/services/**/*.ts" "src/routes/**/*.ts" "scripts/**/*.ts" || true
+        run: npx eslint "src/services/**/*.ts" "src/routes/**/*.ts"
 
   validate-dependencies:
     name: Validate Dependencies
