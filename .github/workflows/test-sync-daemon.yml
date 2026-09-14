@@ -32,11 +32,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: TypeScript compilation check
-        run: npx tsc --noEmit
+      # The repo-wide `tsc --noEmit` moved to ci.yml, which runs on every PR.
+      # Keeping it here meant the only typecheck in the repo was gated behind
+      # this workflow's Notion-specific paths filter.
 
+      # `scripts/**/*.ts` is dropped: eslint.config.js ignores `scripts/**`, so
+      # passing that glob made eslint exit 2 ("no matching configuration") every
+      # run — which the trailing `|| true` then swallowed. The mask is removed
+      # now that the command can actually succeed or fail on merit.
       - name: Lint sync daemon code
-        run: npx eslint "src/services/**/*.ts" "src/routes/**/*.ts" "scripts/**/*.ts" || true
+        run: npx eslint "src/services/**/*.ts" "src/routes/**/*.ts"
 
   validate-dependencies:
     name: Validate Dependencies
@@ -75,8 +80,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Validate PM2 config
-        run: node -c ecosystem.config.js
+      # PM2 step removed: ecosystem.config.js has never existed in this repo and
+      # the service deploys to Cloudflare Workers, not a PM2-managed process.
+      # The step failed on every run of this workflow.
 
       - name: Check .env.example completeness
         run: |
@@ -118,8 +124,13 @@ jobs:
 
       - name: Check for hardcoded secrets
         run: |
-          # Check for Notion tokens
-          if grep -r "secret_[a-zA-Z0-9]" src/ scripts/ --exclude-dir=node_modules; then
+          # Notion integration tokens are `secret_` + ~43 base62 chars. The old
+          # pattern was `secret_[a-zA-Z0-9]`, which matched the placeholder in
+          # scripts/connect-existing-notion-db.ts ("NOTION_TOKEN=secret_xxxxx")
+          # and failed this job on every run. Require realistic length, and
+          # ignore obvious placeholders.
+          if grep -rE "secret_[a-zA-Z0-9]{32,}" src/ scripts/ --exclude-dir=node_modules \
+               | grep -vE "x{5,}|X{5,}|\.\.\."; then
             echo "⚠️ Potential hardcoded Notion token found"
             exit 1
           fi
@@ -168,13 +179,24 @@ jobs:
 
       - name: Test migration script (dry run)
         run: |
-          # Check that script loads without errors
-          npx ts-node -e "console.log('Migration script syntax OK')"
+          # This previously ran `npx ts-node -e "console.log('...')"`, which
+          # evaluates a string literal and never looked at the migration script
+          # at all — it reported success regardless. Typecheck the real files.
+          # --ignoreConfig: the root tsconfig only includes src/**, and passing
+          # files explicitly alongside it is an error (TS5112).
+          npx tsc --noEmit --ignoreConfig \
+            scripts/notion-migration.ts scripts/notion-sync-daemon.ts \
+            --esModuleInterop --skipLibCheck --target ES2022 --module commonjs \
+            --moduleResolution bundler --types node
           echo "✓ Migration scripts are valid TypeScript"
 
       - name: Test sync daemon script (syntax check)
         run: |
-          npx ts-node -e "console.log('Sync daemon script syntax OK')"
+          # Was `npx ts-node -e "console.log('...')"` — same vacuous pattern as
+          # the migration step: it evaluated a literal and never read the file.
+          npx tsc --noEmit --ignoreConfig scripts/notion-sync-daemon.ts \
+            --esModuleInterop --skipLibCheck --target ES2022 --module commonjs \
+            --moduleResolution bundler --types node
           echo "✓ Sync daemon script is valid TypeScript"
 
   documentation-check:
@@ -186,11 +208,12 @@ jobs:
 
       - name: Check required documentation exists
         run: |
+          # DEPLOYMENT.md, NOTION-SYNC.md, NOTION-QUICKSTART.md and
+          # NOTION-INTEGRATION-SUMMARY.md were listed here but have never
+          # existed in this repo, so this job failed on every run. Requiring
+          # docs nobody has written is a wish, not a check — narrowed to the
+          # two that exist. Add them back alongside the documents themselves.
           required_docs=(
-            "DEPLOYMENT.md"
-            "NOTION-SYNC.md"
-            "NOTION-QUICKSTART.md"
-            "NOTION-INTEGRATION-SUMMARY.md"
             "CLAUDE.md"
             "README.md"
           )
@@ -204,12 +227,11 @@ jobs:
             fi
           done
 
-      - name: Verify deployment instructions
-        run: |
-          grep -q "sync.chitty.cc" DEPLOYMENT.md || exit 1
-          grep -q "PM2" DEPLOYMENT.md || exit 1
-          grep -q "Notion" DEPLOYMENT.md || exit 1
-          echo "✓ DEPLOYMENT.md contains required sections"
+      # "Verify deployment instructions" removed alongside the PM2 config check.
+      # It grepped DEPLOYMENT.md — a file that has never existed — for "PM2",
+      # a process manager this service does not use; it deploys to Cloudflare
+      # Workers. Restore it with a DEPLOYMENT.md that describes the real
+      # deployment path, if one is written.
 
   summary:
     name: Test Summary

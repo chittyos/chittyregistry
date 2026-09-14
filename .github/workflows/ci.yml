@@ -24,6 +24,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Runs on every PR. Previously the only `tsc --noEmit` in the repo lived in
+      # test-sync-daemon.yml behind a Notion-specific paths filter, so a repo-wide
+      # check effectively never ran and main carried 80 type errors unnoticed.
+      - name: Type check
+        run: npx tsc --noEmit
+
       - name: Run unit tests
         run: npm test -- --ci
 
