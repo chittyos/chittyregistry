@@ -12,6 +12,15 @@ module.exports = {
         tsconfig: 'tsconfig.json',
       },
     ],
+    // Transform the ESM .js worker (export default) to CommonJS so handler-level
+    // tests can require() it. Scoped to allowJs via an inline ts-jest tsconfig so
+    // the production build (tsconfig.json) is untouched.
+    '^.+\\.js$': [
+      'ts-jest',
+      {
+        tsconfig: { allowJs: true, checkJs: false, module: 'commonjs', esModuleInterop: true },
+      },
+    ],
   },
   collectCoverageFrom: [
     'src/**/*.{ts,js}',
