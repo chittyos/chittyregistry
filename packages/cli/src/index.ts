@@ -66,11 +66,18 @@ program
   .description('Initialize a new ChittyOS project')
   .argument('[project-name]', 'Project name')
   .option('-t, --template <template>', 'Project template', 'service')
-  .option('-r, --registry', 'Include service registry setup')
+  // NB: the long form must not be `--registry` — the root program already
+  // defines a global `--registry <url>`, which shadows it and silently
+  // consumes the NEXT argument (`init x --registry --ai` lost both flags).
+  .option('-r, --with-registry', 'Include service registry setup')
   .option('-a, --ai', 'Include AI orchestration setup')
   .option('-b, --bridge', 'Include context bridge setup')
   .option('--skip-install', 'Skip dependency installation')
-  .action(initCommand);
+  .action((projectName, options) =>
+    // Map the renamed flag back onto the internal option name so InitOptions
+    // and everything downstream keep using `registry`.
+    initCommand(projectName, { ...options, registry: options.withRegistry }),
+  );
 
 program
   .command('status')
@@ -141,8 +148,7 @@ program
   .option('-a, --auth', 'Test pipeline authentication')
   .option('--verify <token>', 'Verify authentication token')
   .action(async (options) => {
-    const { trustCommand } = await import('./commands/trust');
-    await trustCommand(options);
+    await runOptionalCommand('trust', () => import('./commands/trust'), 'trustCommand', options);
   });
 
 program
@@ -153,9 +159,40 @@ program
   .option('-p, --proxy', 'Start development proxy')
   .option('--tunnel', 'Create secure tunnel for testing')
   .action(async (options) => {
-    const { devCommand } = await import('./commands/dev');
-    await devCommand(options);
+    await runOptionalCommand('dev', () => import('./commands/dev'), 'devCommand', options);
   });
+
+// `trust` and `dev` are advertised in --help but their modules are not
+// implemented yet. Without this guard, invoking either prints a raw Node
+// MODULE_NOT_FOUND stack dump. Fail with a legible message instead.
+async function runOptionalCommand(
+  name: string,
+  load: () => Promise<{ [key: string]: (options: unknown) => Promise<void> }>,
+  exportName: string,
+  options: unknown,
+): Promise<void> {
+  let mod;
+  try {
+    mod = await load();
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException & { message?: string };
+    // Only swallow the case where the COMMAND module itself is absent. If the
+    // module exists but one of ITS imports is missing, that is a real bug and
+    // must not be reported as "not implemented".
+    const isMissingCommandModule =
+      (err.code === 'MODULE_NOT_FOUND' || err.code === 'ERR_MODULE_NOT_FOUND') &&
+      new RegExp(`commands[\\\\/]${name}(\\.[cm]?[jt]s)?'?$|commands[\\\\/]${name}(\\.[cm]?[jt]s)?'`).test(err.message ?? '');
+    if (isMissingCommandModule) {
+      console.error(chalk.yellow(`\n  \`chittyos ${name}\` is not implemented yet.`));
+      console.error(chalk.gray(`  The command is listed in --help but its module has not been written.`));
+      console.error(chalk.gray(`  Track it at https://github.com/chittyos/chittyregistry/issues\n`));
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
+  await mod[exportName](options);
+}
 
 // Global error handling
 process.on('uncaughtException', (error) => {

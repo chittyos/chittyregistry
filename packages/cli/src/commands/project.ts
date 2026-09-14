@@ -92,7 +92,7 @@ async function detectProject() {
       console.log(`   ${chalk.gray('Type:')} ${chalk.cyan(projectInfo.type)}`);
       console.log(`   ${chalk.gray('Name:')} ${chalk.cyan(projectInfo.name)}`);
       console.log(`   ${chalk.gray('Path:')} ${chalk.gray(projectInfo.path)}`);
-      console.log(`   ${chalk.gray('Confidence:')} ${getConfidenceColor(projectInfo.confidence)}${projectInfo.confidence}%${chalk.reset()}`);
+      console.log(`   ${chalk.gray('Confidence:')} ${getConfidenceColor(projectInfo.confidence)(projectInfo.confidence + '%')}`);
 
       if (projectInfo.features.length > 0) {
         console.log(`   ${chalk.gray('Features:')} ${projectInfo.features.join(', ')}`);
@@ -226,7 +226,7 @@ async function scanForProject(projectPath: string): Promise<{
     const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
     const chittyOSPackages = Object.keys(deps).filter(dep => dep.startsWith('@chittyos/'));
 
-    if (chittyOSPackages.length > 0 || deps['@chittyos/standard']) {
+    if (chittyOSPackages.length > 0) {
       result.detected = true;
       result.type = 'chittyos-service';
       score += 50;
@@ -237,10 +237,10 @@ async function scanForProject(projectPath: string): Promise<{
       }
 
       // Detect features with scoring
-      if (deps['@cloudflare/mcp-agent-api']) {
+      if (deps['@langchain/core'] || deps['@langchain/cloudflare']) {
         result.features.push('AI Orchestration');
         score += 10;
-        result.indicators.push('MCP Agent API');
+        result.indicators.push('LangChain dependencies');
       }
       if (deps['ws'] && deps['uuid']) {
         result.features.push('Context Bridge');
@@ -284,9 +284,37 @@ async function scanForProject(projectPath: string): Promise<{
   for (const configFile of configFiles) {
     if (await fs.pathExists(path.join(projectPath, configFile))) {
       result.detected = true;
-      if (result.type === 'unknown') result.type = 'chittyos-project';
       score += configFile.includes('.chittyos') ? 25 : 15;
       result.indicators.push(`Config: ${configFile}`);
+
+      // `.chittyos.json` is written by `chittyos init` and records what the
+      // project actually is. Prefer it over guessing: dependency-shape
+      // inference is a fallback for projects created before markers existed.
+      if (configFile === '.chittyos.json') {
+        let marker: { type?: string; name?: string; features?: string[] } | undefined;
+        try {
+          marker = await fs.readJSON(path.join(projectPath, configFile));
+        } catch {
+          result.indicators.push('Config: .chittyos.json (unreadable)');
+        }
+
+        // A marker written by `chittyos init` is definitive, so it scores as
+        // strongly as the dependency heuristic it replaced. Without this a
+        // default scaffold lands under the confidence >= 50 gate and the CLI
+        // declines to auto-configure its own output.
+        if (marker) score += 25;
+
+        result.type = marker?.type ?? (result.type === 'unknown' ? 'chittyos-project' : result.type);
+        if (marker?.name) result.name = marker.name;
+
+        // Canonical ids, not display labels: setupProjectHooks tests
+        // features.includes('registry') / .includes('qa').
+        for (const feature of marker?.features ?? []) {
+          if (!result.features.includes(feature)) result.features.push(feature);
+        }
+      } else if (result.type === 'unknown') {
+        result.type = 'chittyos-project';
+      }
     }
   }
 
@@ -760,7 +788,7 @@ async function autoConfigureProject(projectInfo: any) {
     console.log(`   ${chalk.gray('Config:')} ${chalk.blue('.chittyos/project.json')}`);
     console.log(`   ${chalk.gray('Type:')} ${chalk.cyan(projectInfo.type)}`);
     console.log(`   ${chalk.gray('Features:')} ${projectInfo.features.join(', ')}`);
-    console.log(`   ${chalk.gray('Confidence:')} ${getConfidenceColor(projectInfo.confidence)}${projectInfo.confidence}%${chalk.reset()}`);
+    console.log(`   ${chalk.gray('Confidence:')} ${getConfidenceColor(projectInfo.confidence)(projectInfo.confidence + '%')}`);
 
   } catch (error) {
     spinner.fail('Auto-configuration failed');
