@@ -192,7 +192,11 @@ jobs:
 
       - name: Test sync daemon script (syntax check)
         run: |
-          npx ts-node -e "console.log('Sync daemon script syntax OK')"
+          # Was `npx ts-node -e "console.log('...')"` — same vacuous pattern as
+          # the migration step: it evaluated a literal and never read the file.
+          npx tsc --noEmit --ignoreConfig scripts/notion-sync-daemon.ts \
+            --esModuleInterop --skipLibCheck --target ES2022 --module commonjs \
+            --moduleResolution bundler --types node
           echo "✓ Sync daemon script is valid TypeScript"
 
   documentation-check:
@@ -223,12 +227,11 @@ jobs:
             fi
           done
 
-      - name: Verify deployment instructions
-        run: |
-          grep -q "sync.chitty.cc" DEPLOYMENT.md || exit 1
-          grep -q "PM2" DEPLOYMENT.md || exit 1
-          grep -q "Notion" DEPLOYMENT.md || exit 1
-          echo "✓ DEPLOYMENT.md contains required sections"
+      # "Verify deployment instructions" removed alongside the PM2 config check.
+      # It grepped DEPLOYMENT.md — a file that has never existed — for "PM2",
+      # a process manager this service does not use; it deploys to Cloudflare
+      # Workers. Restore it with a DEPLOYMENT.md that describes the real
+      # deployment path, if one is written.
 
   summary:
     name: Test Summary
