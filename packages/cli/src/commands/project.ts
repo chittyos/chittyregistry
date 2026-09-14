@@ -11,6 +11,12 @@ function getConfidenceColor(confidence: number) {
   return chalk.red.bold;
 }
 
+const FEATURE_LABELS: Record<string, string> = {
+  ai: 'AI Orchestration',
+  bridge: 'Context Bridge',
+  registry: 'Service Registry',
+};
+
 export interface ProjectOptions {
   detect?: boolean;
   configure?: boolean;
@@ -240,7 +246,7 @@ async function scanForProject(projectPath: string): Promise<{
       if (deps['@langchain/core'] || deps['@langchain/cloudflare']) {
         result.features.push('AI Orchestration');
         score += 10;
-        result.indicators.push('MCP Agent API');
+        result.indicators.push('LangChain dependencies');
       }
       if (deps['ws'] && deps['uuid']) {
         result.features.push('Context Bridge');
@@ -284,9 +290,27 @@ async function scanForProject(projectPath: string): Promise<{
   for (const configFile of configFiles) {
     if (await fs.pathExists(path.join(projectPath, configFile))) {
       result.detected = true;
-      if (result.type === 'unknown') result.type = 'chittyos-project';
       score += configFile.includes('.chittyos') ? 25 : 15;
       result.indicators.push(`Config: ${configFile}`);
+
+      // `.chittyos.json` is written by `chittyos init` and records what the
+      // project actually is. Prefer it over guessing: dependency-shape
+      // inference is a fallback for projects created before markers existed.
+      if (configFile === '.chittyos.json') {
+        try {
+          const marker = await fs.readJSON(path.join(projectPath, configFile));
+          if (marker.type) result.type = marker.type;
+          if (marker.name && result.name === 'unknown') result.name = marker.name;
+          for (const feature of marker.features ?? []) {
+            const label = FEATURE_LABELS[feature] ?? feature;
+            if (!result.features.includes(label)) result.features.push(label);
+          }
+        } catch {
+          result.indicators.push('Config: .chittyos.json (unreadable)');
+        }
+      } else if (result.type === 'unknown') {
+        result.type = 'chittyos-project';
+      }
     }
   }
 

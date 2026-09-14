@@ -141,8 +141,7 @@ program
   .option('-a, --auth', 'Test pipeline authentication')
   .option('--verify <token>', 'Verify authentication token')
   .action(async (options) => {
-    const { trustCommand } = await import('./commands/trust');
-    await trustCommand(options);
+    await runOptionalCommand('trust', () => import('./commands/trust'), 'trustCommand', options);
   });
 
 program
@@ -153,9 +152,34 @@ program
   .option('-p, --proxy', 'Start development proxy')
   .option('--tunnel', 'Create secure tunnel for testing')
   .action(async (options) => {
-    const { devCommand } = await import('./commands/dev');
-    await devCommand(options);
+    await runOptionalCommand('dev', () => import('./commands/dev'), 'devCommand', options);
   });
+
+// `trust` and `dev` are advertised in --help but their modules are not
+// implemented yet. Without this guard, invoking either prints a raw Node
+// MODULE_NOT_FOUND stack dump. Fail with a legible message instead.
+async function runOptionalCommand(
+  name: string,
+  load: () => Promise<{ [key: string]: (options: unknown) => Promise<void> }>,
+  exportName: string,
+  options: unknown,
+): Promise<void> {
+  let mod;
+  try {
+    mod = await load();
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === 'MODULE_NOT_FOUND' || err.code === 'ERR_MODULE_NOT_FOUND') {
+      console.error(chalk.yellow(`\n  \`chittyos ${name}\` is not implemented yet.`));
+      console.error(chalk.gray(`  The command is listed in --help but its module has not been written.`));
+      console.error(chalk.gray(`  Track it at https://github.com/chittyos/chittyregistry/issues\n`));
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
+  await mod[exportName](options);
+}
 
 // Global error handling
 process.on('uncaughtException', (error) => {
