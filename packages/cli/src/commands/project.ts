@@ -11,12 +11,6 @@ function getConfidenceColor(confidence: number) {
   return chalk.red.bold;
 }
 
-const FEATURE_LABELS: Record<string, string> = {
-  ai: 'AI Orchestration',
-  bridge: 'Context Bridge',
-  registry: 'Service Registry',
-};
-
 export interface ProjectOptions {
   detect?: boolean;
   configure?: boolean;
@@ -297,16 +291,26 @@ async function scanForProject(projectPath: string): Promise<{
       // project actually is. Prefer it over guessing: dependency-shape
       // inference is a fallback for projects created before markers existed.
       if (configFile === '.chittyos.json') {
+        let marker: { type?: string; name?: string; features?: string[] } | undefined;
         try {
-          const marker = await fs.readJSON(path.join(projectPath, configFile));
-          if (marker.type) result.type = marker.type;
-          if (marker.name && result.name === 'unknown') result.name = marker.name;
-          for (const feature of marker.features ?? []) {
-            const label = FEATURE_LABELS[feature] ?? feature;
-            if (!result.features.includes(label)) result.features.push(label);
-          }
+          marker = await fs.readJSON(path.join(projectPath, configFile));
         } catch {
           result.indicators.push('Config: .chittyos.json (unreadable)');
+        }
+
+        // A marker written by `chittyos init` is definitive, so it scores as
+        // strongly as the dependency heuristic it replaced. Without this a
+        // default scaffold lands under the confidence >= 50 gate and the CLI
+        // declines to auto-configure its own output.
+        if (marker) score += 25;
+
+        result.type = marker?.type ?? (result.type === 'unknown' ? 'chittyos-project' : result.type);
+        if (marker?.name) result.name = marker.name;
+
+        // Canonical ids, not display labels: setupProjectHooks tests
+        // features.includes('registry') / .includes('qa').
+        for (const feature of marker?.features ?? []) {
+          if (!result.features.includes(feature)) result.features.push(feature);
         }
       } else if (result.type === 'unknown') {
         result.type = 'chittyos-project';

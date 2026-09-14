@@ -407,6 +407,12 @@ async function generateConfigFiles(projectPath: string, options: InitOptions) {
         ...(options.registry ? ["registry"] : []),
         ...(options.ai ? ["ai"] : []),
         ...(options.bridge ? ["bridge"] : []),
+        // qa-framework/fullstack scaffolds emit tests/qa + jest; record it so
+        // `project --detect` still reports QA now that the dependency-shape
+        // branch no longer runs for generated projects.
+        ...(["qa-framework", "fullstack"].includes(options.template ?? "service")
+          ? ["qa"]
+          : []),
       ],
       createdBy: "@chittyos/cli",
     },
