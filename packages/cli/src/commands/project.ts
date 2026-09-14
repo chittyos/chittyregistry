@@ -92,7 +92,7 @@ async function detectProject() {
       console.log(`   ${chalk.gray('Type:')} ${chalk.cyan(projectInfo.type)}`);
       console.log(`   ${chalk.gray('Name:')} ${chalk.cyan(projectInfo.name)}`);
       console.log(`   ${chalk.gray('Path:')} ${chalk.gray(projectInfo.path)}`);
-      console.log(`   ${chalk.gray('Confidence:')} ${getConfidenceColor(projectInfo.confidence)}${projectInfo.confidence}%${chalk.reset()}`);
+      console.log(`   ${chalk.gray('Confidence:')} ${getConfidenceColor(projectInfo.confidence)(projectInfo.confidence + '%')}`);
 
       if (projectInfo.features.length > 0) {
         console.log(`   ${chalk.gray('Features:')} ${projectInfo.features.join(', ')}`);
@@ -226,7 +226,7 @@ async function scanForProject(projectPath: string): Promise<{
     const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
     const chittyOSPackages = Object.keys(deps).filter(dep => dep.startsWith('@chittyos/'));
 
-    if (chittyOSPackages.length > 0 || deps['@chittyos/standard']) {
+    if (chittyOSPackages.length > 0) {
       result.detected = true;
       result.type = 'chittyos-service';
       score += 50;
@@ -237,7 +237,7 @@ async function scanForProject(projectPath: string): Promise<{
       }
 
       // Detect features with scoring
-      if (deps['@cloudflare/mcp-agent-api']) {
+      if (deps['@langchain/core'] || deps['@langchain/cloudflare']) {
         result.features.push('AI Orchestration');
         score += 10;
         result.indicators.push('MCP Agent API');
@@ -760,7 +760,7 @@ async function autoConfigureProject(projectInfo: any) {
     console.log(`   ${chalk.gray('Config:')} ${chalk.blue('.chittyos/project.json')}`);
     console.log(`   ${chalk.gray('Type:')} ${chalk.cyan(projectInfo.type)}`);
     console.log(`   ${chalk.gray('Features:')} ${projectInfo.features.join(', ')}`);
-    console.log(`   ${chalk.gray('Confidence:')} ${getConfidenceColor(projectInfo.confidence)}${projectInfo.confidence}%${chalk.reset()}`);
+    console.log(`   ${chalk.gray('Confidence:')} ${getConfidenceColor(projectInfo.confidence)(projectInfo.confidence + '%')}`);
 
   } catch (error) {
     spinner.fail('Auto-configuration failed');

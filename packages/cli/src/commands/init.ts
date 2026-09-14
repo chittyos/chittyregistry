@@ -394,6 +394,25 @@ async function generateConfigFiles(projectPath: string, options: InitOptions) {
     exclude: ["node_modules", "dist", "tests"],
   };
 
+  // Project marker. `chittyos project --detect` looks for .chittyos.json
+  // explicitly; emitting it means detection does not depend on inferring
+  // ChittyOS-ness from a dependency name.
+  await fs.writeJSON(
+    path.join(projectPath, ".chittyos.json"),
+    {
+      name: path.basename(projectPath),
+      type: "chittyos-service",
+      template: options.template ?? "service",
+      features: [
+        ...(options.registry ? ["registry"] : []),
+        ...(options.ai ? ["ai"] : []),
+        ...(options.bridge ? ["bridge"] : []),
+      ],
+      createdBy: "@chittyos/cli",
+    },
+    { spaces: 2 },
+  );
+
   await fs.writeJSON(path.join(projectPath, "tsconfig.json"), tsConfig, {
     spaces: 2,
   });
