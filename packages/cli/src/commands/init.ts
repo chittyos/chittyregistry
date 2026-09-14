@@ -298,7 +298,6 @@ async function generatePackageJson(
       "lint:fix": "eslint src --ext .ts,.tsx --fix",
     },
     dependencies: {
-      "@chittyos/standard": "^1.0.0",
       express: "^4.18.0",
       winston: "^3.10.0",
       cors: "^2.8.5",
@@ -321,7 +320,6 @@ async function generatePackageJson(
   if (options.ai) {
     packageJson.dependencies = {
       ...packageJson.dependencies,
-      "@cloudflare/mcp-agent-api": "^1.0.0",
       "@langchain/core": "^0.2.0",
       "@langchain/cloudflare": "^0.1.0",
     };
