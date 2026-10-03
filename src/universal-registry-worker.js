@@ -521,6 +521,13 @@ export default {
           return jsonResponse({ error: "Invalid JSON body" }, 400, corsHeaders);
         }
 
+        // A JSON body of `null`, a scalar, or an array would make the field checks
+        // below throw and surface as a 500 from the outer catch. Reject it as the
+        // client error it is.
+        if (typeof serverData !== "object" || serverData === null || Array.isArray(serverData)) {
+          return jsonResponse({ error: "Request body must be a JSON object" }, 400, corsHeaders);
+        }
+
         if (!serverData.name || !serverData.description || !serverData.version) {
           return jsonResponse(
             { error: "name, description, and version are required" },
@@ -529,8 +536,69 @@ export default {
           );
         }
 
-        serverData._publishedAt = serverData._publishedAt || new Date().toISOString();
-        serverData._updatedAt = new Date().toISOString();
+        // The read path (getAllMcpServers) drops any stored entry whose name,
+        // description or version is not a string, so a non-string here writes a KV
+        // key that never appears in any listing again. Enforce the same contract on
+        // the way in. This check must precede the separator check below, which calls
+        // String.prototype.includes on the name.
+        if (
+          typeof serverData.name !== "string" ||
+          typeof serverData.description !== "string" ||
+          typeof serverData.version !== "string"
+        ) {
+          return jsonResponse(
+            { error: "name, description, and version must be strings" },
+            400,
+            corsHeaders,
+          );
+        }
+
+        // The KV key is `mcp-servers:${name}:${version}` with no escaping. A colon in
+        // the name makes that mapping ambiguous — name "a" + version "b:1.0" and name
+        // "a:b" + version "1.0" produce the same key, letting one registrant overwrite
+        // another's entry. With the name colon-free the name is exactly the span up to
+        // the first colon after the prefix and the version is the remainder, so the key
+        // is unique per (name, version) and the version needs no such restriction.
+        if (serverData.name.includes(":")) {
+          return jsonResponse(
+            { error: "name must not contain ':'" },
+            400,
+            corsHeaders,
+          );
+        }
+
+        // Underscore-prefixed fields are this route's server-side metadata, not caller
+        // input. `_internal` drives the section split in renderAllowedListHtml, so a
+        // caller-supplied value would list a third-party server under "Internal
+        // (ChittyOS)"; `_publishedAt` is echoed as _meta.publishedAt by
+        // formatMcpRegistryEntry, so a caller-supplied value forges the publication
+        // date. Drop every `_`-prefixed key from the payload and set ours afterwards.
+        for (const key of Object.keys(serverData)) {
+          if (key.startsWith("_")) delete serverData[key];
+        }
+
+        const nowIso = new Date().toISOString();
+        serverData._updatedAt = nowIso;
+
+        // Unlike /internal/upsert, this route persists with no record of who called it.
+        // Record only what the request actually proves: which configured secret admitted
+        // it, how it arrived, and the Cloudflare-supplied request metadata. Never the
+        // token itself, and no claimed identity. X-Internal-Source is caller-controlled
+        // on this route — unlike /internal/upsert, which 403s without the service-binding
+        // header — so it is only recorded when the request did arrive over that binding.
+        // Underscore-prefixed, so formatMcpRegistryEntry's field whitelist keeps it out
+        // of public GET responses.
+        const viaServiceBinding =
+          !request.headers.get("CF-Connecting-IP") &&
+          request.headers.get("X-Chitty-Internal-Binding") === "chittyregister";
+        serverData._registeredBy = {
+          auth: "MCP_REGISTRY_ADMIN_TOKEN",
+          via: viaServiceBinding ? "service-binding" : "admin-token",
+          source: viaServiceBinding ? request.headers.get("X-Internal-Source") || null : null,
+          ip: request.headers.get("CF-Connecting-IP") || null,
+          ray: request.headers.get("cf-ray") || null,
+          at: nowIso,
+        };
 
         if (!env.REGISTRY_STORE || typeof env.REGISTRY_STORE.put !== "function") {
           return jsonResponse(
@@ -541,10 +609,53 @@ export default {
         }
 
         const kvKey = `mcp-servers:${serverData.name}:${serverData.version}`;
+
+        // getAllMcpServers issues one KV `get` per stored key inside a single request,
+        // with no cursor loop over list(). Two ceilings follow from that: a KV list page
+        // returns at most 1000 keys (anything past the first page is never read), and a
+        // Workers request may make at most 1000 subrequests, which the 1 list + N gets
+        // have to share with the rest of the handler. MCP_REGISTRY_MAX_KV_SERVERS sits
+        // well under both. Updates to an existing key are always allowed, so reaching
+        // the cap does not freeze the entries already registered.
+        const existingKeys = await env.REGISTRY_STORE.list({ prefix: "mcp-servers:" });
+        const storedCount = existingKeys?.keys?.length || 0;
+        const isUpdate = (existingKeys?.keys || []).some((k) => k.name === kvKey);
+
+        // _publishedAt is no longer accepted from the caller, so an update carries the
+        // stored value forward rather than resetting the publication date on every POST.
+        serverData._publishedAt = nowIso;
+        if (isUpdate) {
+          try {
+            const prior = JSON.parse(await env.REGISTRY_STORE.get(kvKey));
+            if (prior && typeof prior._publishedAt === "string") {
+              serverData._publishedAt = prior._publishedAt;
+            }
+          } catch {
+            // Unreadable prior record — keep the fresh timestamp.
+          }
+        }
+
+        if (!isUpdate && storedCount >= MCP_REGISTRY_MAX_KV_SERVERS) {
+          return jsonResponse(
+            {
+              error: "MCP server registry is full",
+              code: "REGISTRY_FULL",
+              limit: MCP_REGISTRY_MAX_KV_SERVERS,
+              stored: storedCount,
+            },
+            507,
+            corsHeaders,
+          );
+        }
+
         await env.REGISTRY_STORE.put(kvKey, JSON.stringify(serverData));
 
         return jsonResponse(
-          { success: true, server: formatMcpRegistryEntry(serverData) },
+          {
+            success: true,
+            server: formatMcpRegistryEntry(serverData),
+            registered_by: serverData._registeredBy,
+          },
           201,
           corsHeaders,
         );
@@ -1102,6 +1213,11 @@ async function getAvailableCommands(env) {
 // ============================================
 // MCP REGISTRY v0.1
 // ============================================
+
+// Ceiling on KV-stored MCP server registrations. See the POST /v0.1/servers handler
+// for the derivation: getAllMcpServers reads one unpaginated KV list page (1000 keys)
+// and issues one get per key within a single Workers request (1000-subrequest limit).
+const MCP_REGISTRY_MAX_KV_SERVERS = 100;
 
 function getMcpServerSeed() {
   const now = "2026-03-03T00:00:00Z";
