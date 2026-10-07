@@ -611,24 +611,27 @@ export default {
         const kvKey = `mcp-servers:${serverData.name}:${serverData.version}`;
 
         // getAllMcpServers issues one KV `get` per stored key inside a single request,
-        // with no cursor loop over list(). Two ceilings follow from that: a KV list page
-        // returns at most 1000 keys (anything past the first page is never read), and a
-        // Workers request may make at most 1000 subrequests, which the 1 list + N gets
-        // have to share with the rest of the handler. MCP_REGISTRY_MAX_KV_SERVERS sits
-        // well under both. Updates to an existing key are always allowed, so reaching
-        // the cap does not freeze the entries already registered.
+        // with no cursor loop over list(). This KV count is a best-effort admission
+        // guard that bounds normal growth well below the list-page and subrequest
+        // ceilings, but it is not a transactional global counter. Updates to an
+        // existing key are always allowed, so reaching the threshold does not freeze
+        // the entries already registered.
         const existingKeys = await env.REGISTRY_STORE.list({ prefix: "mcp-servers:" });
         const storedCount = existingKeys?.keys?.length || 0;
         const isUpdate = (existingKeys?.keys || []).some((k) => k.name === kvKey);
 
-        // _publishedAt is no longer accepted from the caller, so an update carries the
-        // stored value forward rather than resetting the publication date on every POST.
+        // Server-managed metadata is no longer accepted from the caller, so an update
+        // carries the stored values forward rather than resetting publication date or
+        // moving a previously internal server into the external section.
         serverData._publishedAt = nowIso;
         if (isUpdate) {
           try {
             const prior = JSON.parse(await env.REGISTRY_STORE.get(kvKey));
             if (prior && typeof prior._publishedAt === "string") {
               serverData._publishedAt = prior._publishedAt;
+            }
+            if (prior && typeof prior._internal === "boolean") {
+              serverData._internal = prior._internal;
             }
           } catch {
             // Unreadable prior record — keep the fresh timestamp.
@@ -1214,11 +1217,16 @@ async function getAvailableCommands(env) {
 // MCP REGISTRY v0.1
 // ============================================
 
-// Ceiling on KV-stored MCP server registrations. See the POST /v0.1/servers handler
-// for the derivation: getAllMcpServers reads one unpaginated KV list page (1000 keys)
-// and issues one get per key within a single Workers request (1000-subrequest limit).
+// Best-effort ceiling on KV-stored MCP server registrations. See the POST
+// /v0.1/servers handler for the derivation and concurrency limits.
 const MCP_REGISTRY_MAX_KV_SERVERS = 100;
 
+/**
+ * Returns the built-in MCP server catalog entries that are always published.
+ *
+ * These seed records are merged with KV-backed registrations before public MCP
+ * registry and allowed-list responses are formatted.
+ */
 function getMcpServerSeed() {
   const now = "2026-03-03T00:00:00Z";
   return [

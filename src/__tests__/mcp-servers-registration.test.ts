@@ -201,6 +201,44 @@ describe('4. caller-supplied underscore fields are stripped', () => {
     expect(externalSection).toContain('cc.chitty/test-harness-server');
   });
 
+  test('updating a stored internal server preserves its internal classification', async () => {
+    const { env, kv } = makeEnv();
+    await kv.put(
+      'mcp-servers:cc.chitty/test-harness-server:1.0.0',
+      JSON.stringify({
+        name: 'cc.chitty/test-harness-server',
+        description: 'Stored internal MCP server',
+        version: '1.0.0',
+        _internal: true,
+        _publishedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+
+    const res = await post(
+      env,
+      validEntry({
+        description: 'Updated internal MCP server',
+        _internal: false,
+        _publishedAt: '1999-01-01T00:00:00.000Z',
+      }),
+    );
+    expect(res.status).toBe(201);
+
+    const stored = JSON.parse(
+      (await kv.get('mcp-servers:cc.chitty/test-harness-server:1.0.0')) as string,
+    );
+    expect(stored).toMatchObject({
+      description: 'Updated internal MCP server',
+      _internal: true,
+      _publishedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const html = await (await get(env, '/allowed-list')).text();
+    const [internalSection, externalSection] = html.split('<h2>External');
+    expect(internalSection).toContain('cc.chitty/test-harness-server');
+    expect(externalSection).not.toContain('cc.chitty/test-harness-server');
+  });
+
   test('_publishedAt cannot be backdated by the caller', async () => {
     const { env } = makeEnv();
     const res = await post(env, validEntry({ _publishedAt: '1999-01-01T00:00:00Z' }));
