@@ -506,7 +506,21 @@ export default {
           ? authHeader.slice(7).trim()
           : "";
 
-        if (!adminToken || bearerToken !== adminToken) {
+        // A Cloudflare service-binding call carries no Bearer, so requiring the admin
+        // token made the register->discovery bridge structurally unreachable: the
+        // canonical first-party writer was rejected outright
+        // (chittyfoundation/chittyregister#51). Accept the binding as its own auth path.
+        //
+        // The header ALONE is not evidence — an external client can set it. A real
+        // binding call has no CF-Connecting-IP. This matches the outer write gate and
+        // the test already used below for attribution, which is hoisted here so the
+        // one definition serves both.
+        const viaServiceBinding =
+          !request.headers.get("CF-Connecting-IP") &&
+          request.headers.get("X-Chitty-Internal-Binding") === "chittyregister";
+        const viaAdmin = Boolean(adminToken) && bearerToken === adminToken;
+
+        if (!viaAdmin && !viaServiceBinding) {
           return jsonResponse(
             { error: "Unauthorized registry mutation" },
             401,
@@ -567,6 +581,46 @@ export default {
           );
         }
 
+        // Namespace confinement for binding writes. The binding speaks for registrants,
+        // not for the registry: chittyregister's /api/v1/register is PUBLIC, so the name
+        // reaching here derives from an attacker-controlled submission. The admin token
+        // keeps full reach.
+        //
+        // Anchored single segment, not a startsWith check: `cc.chitty//official` passes
+        // startsWith, and a client normalizing `//` to `/` renders it as the seeded
+        // `cc.chitty/official`. The segment is further required to contain a
+        // non-separator character, so bare `.` and `..` are rejected — `[A-Za-z0-9._-]+`
+        // alone matches both, and the name is used as a KV key path segment.
+        const CC_SEGMENT = /^cc\.chitty\/(?=[^.]|\.[^.]|\.\.[^.])[A-Za-z0-9._-]+$/;
+        if (!viaAdmin && !CC_SEGMENT.test(serverData.name)) {
+          return jsonResponse(
+            { error: "service-binding writes are confined to the cc.chitty/ namespace" },
+            403,
+            corsHeaders,
+          );
+        }
+
+        // Reserved-name rejection, and the part the namespace check does NOT do.
+        //
+        // Confinement bounds the namespace; it does not stop a submitted name from being
+        // EXACTLY a seeded entry (`cc.chitty/chittymcp`, `cc.chitty/neon`). Such a write
+        // is currently harmless to readers because getAllMcpServers() drops any KV entry
+        // whose name collides with a seed, and both the listing and the single-version
+        // lookup go through it — so a squat is stored but never served. That is the only
+        // thing standing between a public submission and a forged canonical entry, it
+        // lives in the read path, and nothing here enforces it.
+        //
+        // Reject at the write instead: refuse rather than accept-and-silently-discard, so
+        // the registrant gets a real error, KV is not polluted with shadow records, and
+        // the protection does not depend on every future read path remembering to filter.
+        if (!viaAdmin && getMcpServerSeed().some((entry) => entry.name === serverData.name)) {
+          return jsonResponse(
+            { error: "name is a reserved canonical entry", name: serverData.name },
+            409,
+            corsHeaders,
+          );
+        }
+
         // Underscore-prefixed fields are this route's server-side metadata, not caller
         // input. `_internal` drives the section split in renderAllowedListHtml, so a
         // caller-supplied value would list a third-party server under "Internal
@@ -588,11 +642,11 @@ export default {
         // header — so it is only recorded when the request did arrive over that binding.
         // Underscore-prefixed, so formatMcpRegistryEntry's field whitelist keeps it out
         // of public GET responses.
-        const viaServiceBinding =
-          !request.headers.get("CF-Connecting-IP") &&
-          request.headers.get("X-Chitty-Internal-Binding") === "chittyregister";
         serverData._registeredBy = {
-          auth: "MCP_REGISTRY_ADMIN_TOKEN",
+          // Which path actually admitted the write, not which one it claims. Previously
+          // hardcoded to the admin token, which was wrong the moment the binding became
+          // an accepted auth path.
+          auth: viaAdmin ? "MCP_REGISTRY_ADMIN_TOKEN" : "service-binding:chittyregister",
           via: viaServiceBinding ? "service-binding" : "admin-token",
           source: viaServiceBinding ? request.headers.get("X-Internal-Source") || null : null,
           ip: request.headers.get("CF-Connecting-IP") || null,
