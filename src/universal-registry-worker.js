@@ -498,18 +498,7 @@ export default {
         return jsonResponse(formatMcpRegistryEntry(server), 200, corsHeaders);
       }
 
-      // POST /v0.1/servers — register a new MCP server.
-      //
-      // Two accepted writers, with DIFFERENT privilege:
-      //   - operator admin token  → may write any namespace
-      //   - chittyregister service binding → may write ONLY the cc.chitty/ namespace
-      //
-      // The binding is accepted because the register→discovery bridge is otherwise
-      // structurally broken (chittyfoundation/chittyregister#51): a binding call carries
-      // no Bearer, so the canonical first-party writer was rejected. But accepting it
-      // without the constraints below opens a privilege chain — /api/v1/register is a
-      // PUBLIC endpoint, so "trust the binding" would mean trusting arbitrary submitted
-      // fields with registry-admin effect. Every validation here is load-bearing.
+      // POST /v0.1/servers — register a new MCP server (auth required)
       if (path === "/v0.1/servers" && request.method === "POST") {
         const adminToken = env.MCP_REGISTRY_ADMIN_TOKEN;
         const authHeader = request.headers.get("Authorization") || "";
@@ -517,16 +506,21 @@ export default {
           ? authHeader.slice(7).trim()
           : "";
 
-        const viaAdmin = Boolean(adminToken) && bearerToken === adminToken;
-        // Matches the outer write gate exactly: the header ALONE is not evidence of a service
-        // binding, because an external client can set it. A real binding call has no
-        // CF-Connecting-IP. Checking only the header here would leave the inner gate weaker
-        // than the outer one, so this gate would not hold if it ever became the only one.
-        const viaBinding =
+        // A Cloudflare service-binding call carries no Bearer, so requiring the admin
+        // token made the register->discovery bridge structurally unreachable: the
+        // canonical first-party writer was rejected outright
+        // (chittyfoundation/chittyregister#51). Accept the binding as its own auth path.
+        //
+        // The header ALONE is not evidence — an external client can set it. A real
+        // binding call has no CF-Connecting-IP. This matches the outer write gate and
+        // the test already used below for attribution, which is hoisted here so the
+        // one definition serves both.
+        const viaServiceBinding =
           !request.headers.get("CF-Connecting-IP") &&
           request.headers.get("X-Chitty-Internal-Binding") === "chittyregister";
+        const viaAdmin = Boolean(adminToken) && bearerToken === adminToken;
 
-        if (!viaAdmin && !viaBinding) {
+        if (!viaAdmin && !viaServiceBinding) {
           return jsonResponse(
             { error: "Unauthorized registry mutation" },
             401,
@@ -534,14 +528,21 @@ export default {
           );
         }
 
-        let body;
+        let serverData;
         try {
-          body = await request.json();
+          serverData = await request.json();
         } catch {
           return jsonResponse({ error: "Invalid JSON body" }, 400, corsHeaders);
         }
 
-        if (!body.name || !body.description || !body.version) {
+        // A JSON body of `null`, a scalar, or an array would make the field checks
+        // below throw and surface as a 500 from the outer catch. Reject it as the
+        // client error it is.
+        if (typeof serverData !== "object" || serverData === null || Array.isArray(serverData)) {
+          return jsonResponse({ error: "Request body must be a JSON object" }, 400, corsHeaders);
+        }
+
+        if (!serverData.name || !serverData.description || !serverData.version) {
           return jsonResponse(
             { error: "name, description, and version are required" },
             400,
@@ -549,74 +550,88 @@ export default {
           );
         }
 
-        // Types + length caps. Unbounded strings from a public submission path become
-        // unbounded KV values.
-        const str = (v, max) =>
-          typeof v === "string" && v.length > 0 && v.length <= max ? v : null;
-        const name = str(body.name, 128);
-        const description = str(body.description, 2048);
-        const version = str(body.version, 64);
-        if (!name || !description || !version) {
+        // The read path (getAllMcpServers) drops any stored entry whose name,
+        // description or version is not a string, so a non-string here writes a KV
+        // key that never appears in any listing again. Enforce the same contract on
+        // the way in. This check must precede the separator check below, which calls
+        // String.prototype.includes on the name.
+        if (
+          typeof serverData.name !== "string" ||
+          typeof serverData.description !== "string" ||
+          typeof serverData.version !== "string"
+        ) {
           return jsonResponse(
-            { error: "name (<=128), description (<=2048), version (<=64) must be non-empty strings" },
+            { error: "name, description, and version must be strings" },
             400,
             corsHeaders,
           );
         }
 
-        // `:` is the KV key separator below. Allowing it in name or version lets one
-        // registration address — and overwrite — another server's key.
-        if (name.includes(":") || version.includes(":")) {
+        // The KV key is `mcp-servers:${name}:${version}` with no escaping. A colon in
+        // the name makes that mapping ambiguous — name "a" + version "b:1.0" and name
+        // "a:b" + version "1.0" produce the same key, letting one registrant overwrite
+        // another's entry. With the name colon-free the name is exactly the span up to
+        // the first colon after the prefix and the version is the remainder, so the key
+        // is unique per (name, version) and the version needs no such restriction.
+        if (serverData.name.includes(":")) {
           return jsonResponse(
-            { error: "name and version must not contain ':'" },
-            400,
-            corsHeaders,
-          );
-        }
-        if (!/^[A-Za-z0-9._\-/]+$/.test(name) || !/^[A-Za-z0-9._\-+]+$/.test(version)) {
-          return jsonResponse(
-            { error: "name or version contains unsupported characters" },
+            { error: "name must not contain ':'" },
             400,
             corsHeaders,
           );
         }
 
-        // Namespace confinement. The binding writer speaks for registrants, not for the
-        // registry, so it cannot mint names outside cc.chitty/ — otherwise a submitted
-        // `registry_name` could squat a seed/reserved entry. `..` is rejected because the
-        // name is a key path segment.
-        // Exactly one slash under the namespace: `cc.chitty//official` satisfies a startsWith
-        // check, but a client normalizing `//` to `/` would render it as the seeded
-        // `cc.chitty/official`. Anchored single segment, ASCII only.
-        if (!viaAdmin && !/^cc\.chitty\/[A-Za-z0-9._-]+$/.test(name)) {
+        // Namespace confinement for binding writes. The binding speaks for registrants,
+        // not for the registry: chittyregister's /api/v1/register is PUBLIC, so the name
+        // reaching here derives from an attacker-controlled submission. Without this, a
+        // submitted registry_name could squat a seeded or reserved entry
+        // (cc.chitty/chittymcp, cc.chitty/neon, ...) and be served to MCP clients as the
+        // real thing. The admin token keeps full reach.
+        //
+        // Anchored single segment, not a startsWith check: `cc.chitty//official` passes
+        // startsWith, and a client normalizing `//` to `/` renders it as the seeded
+        // `cc.chitty/official`. ASCII only, and `..` cannot appear since `/` is excluded
+        // after the namespace.
+        if (!viaAdmin && !/^cc\.chitty\/[A-Za-z0-9._-]+$/.test(serverData.name)) {
           return jsonResponse(
             { error: "service-binding writes are confined to the cc.chitty/ namespace" },
             403,
             corsHeaders,
           );
         }
-        if (name.includes("..")) {
-          return jsonResponse({ error: "name must not contain '..'" }, 400, corsHeaders);
+
+        // Underscore-prefixed fields are this route's server-side metadata, not caller
+        // input. `_internal` drives the section split in renderAllowedListHtml, so a
+        // caller-supplied value would list a third-party server under "Internal
+        // (ChittyOS)"; `_publishedAt` is echoed as _meta.publishedAt by
+        // formatMcpRegistryEntry, so a caller-supplied value forges the publication
+        // date. Drop every `_`-prefixed key from the payload and set ours afterwards.
+        for (const key of Object.keys(serverData)) {
+          if (key.startsWith("_")) delete serverData[key];
         }
 
-        // Rebuild from an allowlist rather than storing the submitted object. The old code
-        // wrote `serverData` verbatim, so any client-supplied `_`-prefixed key (`_internal`,
-        // `_meta`, `_publishedAt`) was persisted and later read back as if the registry had
-        // set it. Server-controlled metadata is stamped after this, never accepted.
-        const serverData = { name, description, version };
-        if (typeof body.websiteUrl === "string" && body.websiteUrl.length <= 2048) {
-          serverData.websiteUrl = body.websiteUrl;
-        }
-        if (body.repository && typeof body.repository === "object") {
-          serverData.repository = body.repository;
-        }
-        if (Array.isArray(body.remotes)) serverData.remotes = body.remotes.slice(0, 8);
-        if (Array.isArray(body.packages)) serverData.packages = body.packages.slice(0, 16);
+        const nowIso = new Date().toISOString();
+        serverData._updatedAt = nowIso;
 
-        serverData._publishedAt = new Date().toISOString();
-        serverData._updatedAt = serverData._publishedAt;
-        // Attribution: which writer actually made this entry, not which one it claims.
-        serverData._writer = viaAdmin ? "admin-token" : "binding:chittyregister";
+        // Unlike /internal/upsert, this route persists with no record of who called it.
+        // Record only what the request actually proves: which configured secret admitted
+        // it, how it arrived, and the Cloudflare-supplied request metadata. Never the
+        // token itself, and no claimed identity. X-Internal-Source is caller-controlled
+        // on this route — unlike /internal/upsert, which 403s without the service-binding
+        // header — so it is only recorded when the request did arrive over that binding.
+        // Underscore-prefixed, so formatMcpRegistryEntry's field whitelist keeps it out
+        // of public GET responses.
+        serverData._registeredBy = {
+          // Which path actually admitted the write, not which one it claims. Previously
+          // hardcoded to the admin token, which was wrong the moment the binding became
+          // an accepted auth path.
+          auth: viaAdmin ? "MCP_REGISTRY_ADMIN_TOKEN" : "service-binding:chittyregister",
+          via: viaServiceBinding ? "service-binding" : "admin-token",
+          source: viaServiceBinding ? request.headers.get("X-Internal-Source") || null : null,
+          ip: request.headers.get("CF-Connecting-IP") || null,
+          ray: request.headers.get("cf-ray") || null,
+          at: nowIso,
+        };
 
         if (!env.REGISTRY_STORE || typeof env.REGISTRY_STORE.put !== "function") {
           return jsonResponse(
@@ -626,21 +641,57 @@ export default {
           );
         }
 
-        // Preserve the original publish timestamp across an upsert.
         const kvKey = `mcp-servers:${serverData.name}:${serverData.version}`;
-        const existingRaw = await env.REGISTRY_STORE.get?.(kvKey);
-        if (existingRaw) {
+
+        // getAllMcpServers issues one KV `get` per stored key inside a single request,
+        // with no cursor loop over list(). This KV count is a best-effort admission
+        // guard that bounds normal growth well below the list-page and subrequest
+        // ceilings, but it is not a transactional global counter. Updates to an
+        // existing key are always allowed, so reaching the threshold does not freeze
+        // the entries already registered.
+        const existingKeys = await env.REGISTRY_STORE.list({ prefix: "mcp-servers:" });
+        const storedCount = existingKeys?.keys?.length || 0;
+        const isUpdate = (existingKeys?.keys || []).some((k) => k.name === kvKey);
+
+        // Server-managed metadata is no longer accepted from the caller, so an update
+        // carries the stored values forward rather than resetting publication date or
+        // moving a previously internal server into the external section.
+        serverData._publishedAt = nowIso;
+        if (isUpdate) {
           try {
-            const prev = JSON.parse(existingRaw);
-            if (typeof prev?._publishedAt === "string") {
-              serverData._publishedAt = prev._publishedAt;
+            const prior = JSON.parse(await env.REGISTRY_STORE.get(kvKey));
+            if (prior && typeof prior._publishedAt === "string") {
+              serverData._publishedAt = prior._publishedAt;
             }
-          } catch { /* unreadable prior value — treat as a fresh publish */ }
+            if (prior && typeof prior._internal === "boolean") {
+              serverData._internal = prior._internal;
+            }
+          } catch {
+            // Unreadable prior record — keep the fresh timestamp.
+          }
         }
+
+        if (!isUpdate && storedCount >= MCP_REGISTRY_MAX_KV_SERVERS) {
+          return jsonResponse(
+            {
+              error: "MCP server registry is full",
+              code: "REGISTRY_FULL",
+              limit: MCP_REGISTRY_MAX_KV_SERVERS,
+              stored: storedCount,
+            },
+            507,
+            corsHeaders,
+          );
+        }
+
         await env.REGISTRY_STORE.put(kvKey, JSON.stringify(serverData));
 
         return jsonResponse(
-          { success: true, server: formatMcpRegistryEntry(serverData) },
+          {
+            success: true,
+            server: formatMcpRegistryEntry(serverData),
+            registered_by: serverData._registeredBy,
+          },
           201,
           corsHeaders,
         );
@@ -1199,6 +1250,16 @@ async function getAvailableCommands(env) {
 // MCP REGISTRY v0.1
 // ============================================
 
+// Best-effort ceiling on KV-stored MCP server registrations. See the POST
+// /v0.1/servers handler for the derivation and concurrency limits.
+const MCP_REGISTRY_MAX_KV_SERVERS = 100;
+
+/**
+ * Returns the built-in MCP server catalog entries that are always published.
+ *
+ * These seed records are merged with KV-backed registrations before public MCP
+ * registry and allowed-list responses are formatted.
+ */
 function getMcpServerSeed() {
   const now = "2026-03-03T00:00:00Z";
   return [
