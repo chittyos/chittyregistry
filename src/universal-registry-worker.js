@@ -583,19 +583,40 @@ export default {
 
         // Namespace confinement for binding writes. The binding speaks for registrants,
         // not for the registry: chittyregister's /api/v1/register is PUBLIC, so the name
-        // reaching here derives from an attacker-controlled submission. Without this, a
-        // submitted registry_name could squat a seeded or reserved entry
-        // (cc.chitty/chittymcp, cc.chitty/neon, ...) and be served to MCP clients as the
-        // real thing. The admin token keeps full reach.
+        // reaching here derives from an attacker-controlled submission. The admin token
+        // keeps full reach.
         //
         // Anchored single segment, not a startsWith check: `cc.chitty//official` passes
         // startsWith, and a client normalizing `//` to `/` renders it as the seeded
-        // `cc.chitty/official`. ASCII only, and `..` cannot appear since `/` is excluded
-        // after the namespace.
-        if (!viaAdmin && !/^cc\.chitty\/[A-Za-z0-9._-]+$/.test(serverData.name)) {
+        // `cc.chitty/official`. The segment is further required to contain a
+        // non-separator character, so bare `.` and `..` are rejected — `[A-Za-z0-9._-]+`
+        // alone matches both, and the name is used as a KV key path segment.
+        const CC_SEGMENT = /^cc\.chitty\/(?=[^.]|\.[^.]|\.\.[^.])[A-Za-z0-9._-]+$/;
+        if (!viaAdmin && !CC_SEGMENT.test(serverData.name)) {
           return jsonResponse(
             { error: "service-binding writes are confined to the cc.chitty/ namespace" },
             403,
+            corsHeaders,
+          );
+        }
+
+        // Reserved-name rejection, and the part the namespace check does NOT do.
+        //
+        // Confinement bounds the namespace; it does not stop a submitted name from being
+        // EXACTLY a seeded entry (`cc.chitty/chittymcp`, `cc.chitty/neon`). Such a write
+        // is currently harmless to readers because getAllMcpServers() drops any KV entry
+        // whose name collides with a seed, and both the listing and the single-version
+        // lookup go through it — so a squat is stored but never served. That is the only
+        // thing standing between a public submission and a forged canonical entry, it
+        // lives in the read path, and nothing here enforces it.
+        //
+        // Reject at the write instead: refuse rather than accept-and-silently-discard, so
+        // the registrant gets a real error, KV is not polluted with shadow records, and
+        // the protection does not depend on every future read path remembering to filter.
+        if (!viaAdmin && getMcpServerSeed().some((entry) => entry.name === serverData.name)) {
+          return jsonResponse(
+            { error: "name is a reserved canonical entry", name: serverData.name },
+            409,
             corsHeaders,
           );
         }
