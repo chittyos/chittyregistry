@@ -7,6 +7,7 @@ import { AuthMiddleware, AuthenticatedRequest } from '../middleware/auth';
 import { ServiceRegistrationSchema } from '../types';
 import { validateBody } from '../middleware/validation';
 import { logger } from '../utils/logger';
+import { routeParam } from '../utils/params';
 
 export function createRegistrationRouter(
   registry: RegistryService,
@@ -78,7 +79,7 @@ export function createRegistrationRouter(
     validateBody(ServiceRegistrationSchema),
     async (req: AuthenticatedRequest, res: Response) => {
       try {
-        const { serviceName } = req.params;
+        const serviceName = routeParam(req.params.serviceName);
         const registration = req.body;
 
         // Verify service name matches
@@ -141,7 +142,7 @@ export function createRegistrationRouter(
     auth.requireServiceOwner,
     async (req: AuthenticatedRequest, res: Response) => {
       try {
-        const { serviceName } = req.params;
+        const serviceName = routeParam(req.params.serviceName);
         const { token } = req.body;
 
         if (!token) {
@@ -193,7 +194,7 @@ export function createRegistrationRouter(
     auth.requireServiceOwner,
     async (req: AuthenticatedRequest, res: Response) => {
       try {
-        const { serviceName } = req.params;
+        const serviceName = routeParam(req.params.serviceName);
         const healthStatus = req.body;
 
         // Validate basic health status structure
@@ -242,7 +243,7 @@ export function createRegistrationRouter(
     auth.optionalAuth,
     async (req: AuthenticatedRequest, res: Response) => {
       try {
-        const { serviceName } = req.params;
+        const serviceName = routeParam(req.params.serviceName);
 
         const health = await healthMonitor.checkServiceNow(serviceName);
 
@@ -314,7 +315,7 @@ export function createRegistrationRouter(
     auth.requireServiceAdmin,
     async (req: AuthenticatedRequest, res: Response) => {
       try {
-        const { serviceName } = req.params;
+        const serviceName = routeParam(req.params.serviceName);
 
         if (!req.chittyId) {
           return res.status(401).json({

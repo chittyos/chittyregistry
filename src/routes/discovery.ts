@@ -5,6 +5,7 @@ import { RegistryService } from '../services/RegistryService';
 import { DiscoveryQuerySchema } from '../types';
 import { logger } from '../utils/logger';
 import { validateQuery } from '../middleware/validation';
+import { routeParam } from '../utils/params';
 
 export function createDiscoveryRouter(registry: RegistryService): Router {
   const router = Router();
@@ -38,7 +39,7 @@ export function createDiscoveryRouter(registry: RegistryService): Router {
    */
   router.get('/services/:serviceName', async (req: Request, res: Response) => {
     try {
-      const { serviceName } = req.params;
+      const serviceName = routeParam(req.params.serviceName);
       const service = await registry.getService(serviceName);
 
       if (!service) {
@@ -106,7 +107,7 @@ export function createDiscoveryRouter(registry: RegistryService): Router {
    */
   router.get('/health/:serviceName', async (req: Request, res: Response) => {
     try {
-      const { serviceName } = req.params;
+      const serviceName = routeParam(req.params.serviceName);
       const health = await registry.getHealthStatus(serviceName);
 
       if (!health) {
@@ -159,7 +160,10 @@ export function createDiscoveryRouter(registry: RegistryService): Router {
    */
   router.get('/capabilities', async (req: Request, res: Response) => {
     try {
-      const services = await registry.discoverServices({});
+      // `includeUnhealthy` is `.default(false)` in the schema, so z.infer makes it
+      // required on the parsed type. Pass it explicitly rather than relying on a
+      // default that only gets applied by .parse(); the runtime value is unchanged.
+      const services = await registry.discoverServices({ includeUnhealthy: false });
       const capabilities = new Set<string>();
 
       services.forEach(service => {
@@ -196,6 +200,7 @@ export function createDiscoveryRouter(registry: RegistryService): Router {
 
       const services = await registry.discoverServices({
         capability,
+        includeUnhealthy: false,
         healthStatus: 'HEALTHY'
       });
 

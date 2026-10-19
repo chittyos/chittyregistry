@@ -506,7 +506,21 @@ export default {
           ? authHeader.slice(7).trim()
           : "";
 
-        if (!adminToken || bearerToken !== adminToken) {
+        // A Cloudflare service-binding call carries no Bearer, so requiring the admin
+        // token made the register->discovery bridge structurally unreachable: the
+        // canonical first-party writer was rejected outright
+        // (chittyfoundation/chittyregister#51). Accept the binding as its own auth path.
+        //
+        // The header ALONE is not evidence — an external client can set it. A real
+        // binding call has no CF-Connecting-IP. This matches the outer write gate and
+        // the test already used below for attribution, which is hoisted here so the
+        // one definition serves both.
+        const viaServiceBinding =
+          !request.headers.get("CF-Connecting-IP") &&
+          request.headers.get("X-Chitty-Internal-Binding") === "chittyregister";
+        const viaAdmin = Boolean(adminToken) && bearerToken === adminToken;
+
+        if (!viaAdmin && !viaServiceBinding) {
           return jsonResponse(
             { error: "Unauthorized registry mutation" },
             401,
@@ -521,6 +535,13 @@ export default {
           return jsonResponse({ error: "Invalid JSON body" }, 400, corsHeaders);
         }
 
+        // A JSON body of `null`, a scalar, or an array would make the field checks
+        // below throw and surface as a 500 from the outer catch. Reject it as the
+        // client error it is.
+        if (typeof serverData !== "object" || serverData === null || Array.isArray(serverData)) {
+          return jsonResponse({ error: "Request body must be a JSON object" }, 400, corsHeaders);
+        }
+
         if (!serverData.name || !serverData.description || !serverData.version) {
           return jsonResponse(
             { error: "name, description, and version are required" },
@@ -529,8 +550,109 @@ export default {
           );
         }
 
-        serverData._publishedAt = serverData._publishedAt || new Date().toISOString();
-        serverData._updatedAt = new Date().toISOString();
+        // The read path (getAllMcpServers) drops any stored entry whose name,
+        // description or version is not a string, so a non-string here writes a KV
+        // key that never appears in any listing again. Enforce the same contract on
+        // the way in. This check must precede the separator check below, which calls
+        // String.prototype.includes on the name.
+        if (
+          typeof serverData.name !== "string" ||
+          typeof serverData.description !== "string" ||
+          typeof serverData.version !== "string"
+        ) {
+          return jsonResponse(
+            { error: "name, description, and version must be strings" },
+            400,
+            corsHeaders,
+          );
+        }
+
+        // The KV key is `mcp-servers:${name}:${version}` with no escaping. A colon in
+        // the name makes that mapping ambiguous — name "a" + version "b:1.0" and name
+        // "a:b" + version "1.0" produce the same key, letting one registrant overwrite
+        // another's entry. With the name colon-free the name is exactly the span up to
+        // the first colon after the prefix and the version is the remainder, so the key
+        // is unique per (name, version) and the version needs no such restriction.
+        if (serverData.name.includes(":")) {
+          return jsonResponse(
+            { error: "name must not contain ':'" },
+            400,
+            corsHeaders,
+          );
+        }
+
+        // Namespace confinement for binding writes. The binding speaks for registrants,
+        // not for the registry: chittyregister's /api/v1/register is PUBLIC, so the name
+        // reaching here derives from an attacker-controlled submission. The admin token
+        // keeps full reach.
+        //
+        // Anchored single segment, not a startsWith check: `cc.chitty//official` passes
+        // startsWith, and a client normalizing `//` to `/` renders it as the seeded
+        // `cc.chitty/official`. The segment is further required to contain a
+        // non-separator character, so bare `.` and `..` are rejected — `[A-Za-z0-9._-]+`
+        // alone matches both, and the name is used as a KV key path segment.
+        const CC_SEGMENT = /^cc\.chitty\/(?=[^.]|\.[^.]|\.\.[^.])[A-Za-z0-9._-]+$/;
+        if (!viaAdmin && !CC_SEGMENT.test(serverData.name)) {
+          return jsonResponse(
+            { error: "service-binding writes are confined to the cc.chitty/ namespace" },
+            403,
+            corsHeaders,
+          );
+        }
+
+        // Reserved-name rejection, and the part the namespace check does NOT do.
+        //
+        // Confinement bounds the namespace; it does not stop a submitted name from being
+        // EXACTLY a seeded entry (`cc.chitty/chittymcp`, `cc.chitty/neon`). Such a write
+        // is currently harmless to readers because getAllMcpServers() drops any KV entry
+        // whose name collides with a seed, and both the listing and the single-version
+        // lookup go through it — so a squat is stored but never served. That is the only
+        // thing standing between a public submission and a forged canonical entry, it
+        // lives in the read path, and nothing here enforces it.
+        //
+        // Reject at the write instead: refuse rather than accept-and-silently-discard, so
+        // the registrant gets a real error, KV is not polluted with shadow records, and
+        // the protection does not depend on every future read path remembering to filter.
+        if (!viaAdmin && getMcpServerSeed().some((entry) => entry.name === serverData.name)) {
+          return jsonResponse(
+            { error: "name is a reserved canonical entry", name: serverData.name },
+            409,
+            corsHeaders,
+          );
+        }
+
+        // Underscore-prefixed fields are this route's server-side metadata, not caller
+        // input. `_internal` drives the section split in renderAllowedListHtml, so a
+        // caller-supplied value would list a third-party server under "Internal
+        // (ChittyOS)"; `_publishedAt` is echoed as _meta.publishedAt by
+        // formatMcpRegistryEntry, so a caller-supplied value forges the publication
+        // date. Drop every `_`-prefixed key from the payload and set ours afterwards.
+        for (const key of Object.keys(serverData)) {
+          if (key.startsWith("_")) delete serverData[key];
+        }
+
+        const nowIso = new Date().toISOString();
+        serverData._updatedAt = nowIso;
+
+        // Unlike /internal/upsert, this route persists with no record of who called it.
+        // Record only what the request actually proves: which configured secret admitted
+        // it, how it arrived, and the Cloudflare-supplied request metadata. Never the
+        // token itself, and no claimed identity. X-Internal-Source is caller-controlled
+        // on this route — unlike /internal/upsert, which 403s without the service-binding
+        // header — so it is only recorded when the request did arrive over that binding.
+        // Underscore-prefixed, so formatMcpRegistryEntry's field whitelist keeps it out
+        // of public GET responses.
+        serverData._registeredBy = {
+          // Which path actually admitted the write, not which one it claims. Previously
+          // hardcoded to the admin token, which was wrong the moment the binding became
+          // an accepted auth path.
+          auth: viaAdmin ? "MCP_REGISTRY_ADMIN_TOKEN" : "service-binding:chittyregister",
+          via: viaServiceBinding ? "service-binding" : "admin-token",
+          source: viaServiceBinding ? request.headers.get("X-Internal-Source") || null : null,
+          ip: request.headers.get("CF-Connecting-IP") || null,
+          ray: request.headers.get("cf-ray") || null,
+          at: nowIso,
+        };
 
         if (!env.REGISTRY_STORE || typeof env.REGISTRY_STORE.put !== "function") {
           return jsonResponse(
@@ -541,10 +663,56 @@ export default {
         }
 
         const kvKey = `mcp-servers:${serverData.name}:${serverData.version}`;
+
+        // getAllMcpServers issues one KV `get` per stored key inside a single request,
+        // with no cursor loop over list(). This KV count is a best-effort admission
+        // guard that bounds normal growth well below the list-page and subrequest
+        // ceilings, but it is not a transactional global counter. Updates to an
+        // existing key are always allowed, so reaching the threshold does not freeze
+        // the entries already registered.
+        const existingKeys = await env.REGISTRY_STORE.list({ prefix: "mcp-servers:" });
+        const storedCount = existingKeys?.keys?.length || 0;
+        const isUpdate = (existingKeys?.keys || []).some((k) => k.name === kvKey);
+
+        // Server-managed metadata is no longer accepted from the caller, so an update
+        // carries the stored values forward rather than resetting publication date or
+        // moving a previously internal server into the external section.
+        serverData._publishedAt = nowIso;
+        if (isUpdate) {
+          try {
+            const prior = JSON.parse(await env.REGISTRY_STORE.get(kvKey));
+            if (prior && typeof prior._publishedAt === "string") {
+              serverData._publishedAt = prior._publishedAt;
+            }
+            if (prior && typeof prior._internal === "boolean") {
+              serverData._internal = prior._internal;
+            }
+          } catch {
+            // Unreadable prior record — keep the fresh timestamp.
+          }
+        }
+
+        if (!isUpdate && storedCount >= MCP_REGISTRY_MAX_KV_SERVERS) {
+          return jsonResponse(
+            {
+              error: "MCP server registry is full",
+              code: "REGISTRY_FULL",
+              limit: MCP_REGISTRY_MAX_KV_SERVERS,
+              stored: storedCount,
+            },
+            507,
+            corsHeaders,
+          );
+        }
+
         await env.REGISTRY_STORE.put(kvKey, JSON.stringify(serverData));
 
         return jsonResponse(
-          { success: true, server: formatMcpRegistryEntry(serverData) },
+          {
+            success: true,
+            server: formatMcpRegistryEntry(serverData),
+            registered_by: serverData._registeredBy,
+          },
           201,
           corsHeaders,
         );
@@ -640,7 +808,7 @@ async function getRegistryStats(env) {
       documentation: 188,
       configs: 200,
     },
-    duplicates: 91,
+    duplicates: 1,
     alternatives: 323,
     directories: 769,
     lastUpdated: new Date().toISOString(),
@@ -859,17 +1027,98 @@ async function getCatalogManifest(env) {
 async function runHealthSweep(env) {
   const tools = await getTools(env, null);
   const results = [];
+  // Counts are unbounded (cheap); the per-record detail is capped so a large
+  // registry cannot blow the Worker's memory or the response size.
+  const SKIP_DETAIL_CAP = 100;
+  const skipped = [];
+  const skipCounts = {};
+  let skippedTotal = 0;
+  const cleared = [];
+  const clearFailures = [];
+  let clearedTotal = 0;
+  let clearFailuresTotal = 0;
+  // Skipping a record means we stop writing to it — which silently freezes
+  // whatever health value it last had. For a record we skip BECAUSE the old
+  // value was wrong (a loopback host we could never reach, our own origin
+  // 522ing), that leaves the false reading published forever, with a stale
+  // last_health_check and nothing marking it as no longer maintained.
+  //
+  // So for policy exclusions on records that are otherwise well-formed, replace
+  // the stale reading with an explicit "excluded" state instead of abandoning
+  // it. Only reasons listed here write; the rest must not, because a record
+  // without a usable chitty_id has no safe key to write to.
+  const CLEAR_STALE_ON = new Set(["loopback_or_private_host", "self_origin"]);
+  const skip = async (tool, reason) => {
+    skippedTotal++;
+    skipCounts[reason] = (skipCounts[reason] ?? 0) + 1;
+    if (skipped.length < SKIP_DETAIL_CAP) {
+      skipped.push({ name: tool.name ?? null, chitty_id: tool.chitty_id ?? null, reason });
+    }
+    if (!tool.chitty_id || !CLEAR_STALE_ON.has(reason)) return;
+    if (tool.health === "excluded" && tool.last_health_error === reason) return; // already clean
+    const updated = {
+      ...tool,
+      health: "excluded",
+      last_health_check: new Date().toISOString(),
+      last_health_error: reason,
+    };
+    // A failed clear must not abort the sweep. This write is housekeeping on a
+    // record we have already decided not to probe; letting it throw would
+    // propagate out of the for-of loop and cost every remaining service its
+    // health check for this run. Record the failure and carry on.
+    try {
+      await env.REGISTRY_STORE.put(`tools:item:${tool.chitty_id}`, JSON.stringify(updated));
+      if (cleared.length < SKIP_DETAIL_CAP) {
+        cleared.push({ name: tool.name ?? null, chitty_id: tool.chitty_id, reason });
+      }
+      clearedTotal++;
+    } catch (e) {
+      clearFailuresTotal++;
+      if (clearFailures.length < SKIP_DETAIL_CAP) {
+        clearFailures.push({ name: tool.name ?? null, error: e.message });
+      }
+    }
+  };
   for (const tool of tools) {
-    if (tool.entity_type !== "T") continue;
-    if (!["service", "mcp-server"].includes(tool.subtype)) continue;
+    // A record with no chitty_id would serialize its KV key as
+    // `tools:item:undefined`, collapsing every such record onto one key.
+    // Skip before any write path can reach it.
+    if (!tool.chitty_id) { await skip(tool, "missing_chitty_id"); continue; }
+    if (tool.entity_type !== "T") { await skip(tool, "entity_type_not_T"); continue; }
+    if (!["service", "mcp-server"].includes(tool.subtype)) { await skip(tool, "subtype_not_swept"); continue; }
     const healthUrl = pickHealthUrl(tool);
-    if (!healthUrl) continue;
+    if (!healthUrl) { await skip(tool, "no_resolvable_health_url"); continue; }
+    if (isUnsweepableHost(healthUrl)) { await skip(tool, "loopback_or_private_host"); continue; }
+    if (isOwnOrigin(healthUrl, env)) { await skip(tool, "self_origin"); continue; }
     let health = "unknown";
     let error = null;
     try {
-      const resp = await fetch(healthUrl, { method: "GET", signal: AbortSignal.timeout(5000) });
-      health = resp.ok ? "healthy" : "unhealthy";
-      if (!resp.ok) error = `HTTP ${resp.status}`;
+      // redirect: "manual" is load-bearing, for two reasons.
+      //
+      // 1. Security: Workers follow redirects by default, and the host checks
+      //    above only ever see the FIRST hop. A public endpoint that 302s to
+      //    http://127.0.0.1/ or 169.254.169.254 would sail straight past them.
+      // 2. Correctness: an Access-gated endpoint 302s to a Cloudflare Access
+      //    login page that returns 200, so following the redirect recorded the
+      //    service as "healthy" when it was never actually reached.
+      //
+      // A /health that redirects has not answered, so treat 3xx as its own
+      // non-healthy state rather than chasing it.
+      const resp = await fetch(healthUrl, {
+        method: "GET",
+        redirect: "manual",
+        signal: AbortSignal.timeout(5000),
+      });
+      if (resp.status >= 300 && resp.status < 400) {
+        health = "unverifiable";
+        const target = resp.headers.get("location");
+        let targetHost = "unknown";
+        try { targetHost = new URL(target, healthUrl).host; } catch { /* keep unknown */ }
+        error = `HTTP ${resp.status} redirect to ${targetHost} (not followed)`;
+      } else {
+        health = resp.ok ? "healthy" : "unhealthy";
+        if (!resp.ok) error = `HTTP ${resp.status}`;
+      }
     } catch (e) {
       health = "unreachable";
       error = e.message;
@@ -891,7 +1140,71 @@ async function runHealthSweep(env) {
     }
   }
   try { await env.REGISTRY_CACHE?.delete("stats"); } catch { /* cache misses are fine */ }
-  return { swept_at: new Date().toISOString(), count: results.length, results };
+  if (skippedTotal) {
+    console.warn(`[health-sweep] skipped ${skippedTotal} of ${tools.length} records`, skipCounts);
+  }
+  return {
+    swept_at: new Date().toISOString(),
+    total: tools.length,
+    count: results.length,
+    skipped_count: skippedTotal,
+    skipped_by_reason: skipCounts,
+    skipped,
+    skipped_detail_truncated: skippedTotal > skipped.length,
+    cleared_stale_count: clearedTotal,
+    cleared_stale: cleared,
+    clear_failures_count: clearFailuresTotal,
+    clear_failures: clearFailures,
+    results,
+  };
+}
+
+// Cloudflare cannot fetch a Worker's own zone from inside that Worker — the
+// request loops back and returns 522. Scoring our own /health as an outage is
+// an artifact, not a signal. (F-007; the original fix landed in the undeployed
+// HealthMonitor.ts, so it never took effect here.)
+function isOwnOrigin(healthUrl, env) {
+  const self = env?.REGISTRY_PUBLIC_ORIGIN ?? "https://registry.chitty.cc";
+  try { return new URL(healthUrl).origin === new URL(self).origin; } catch { return false; }
+}
+
+// Loopback and private hosts are unreachable from a Worker by definition.
+// Scoring them produces a permanent false failure (e.g. openclaw's 403 on
+// http://127.0.0.1:18789/health), so exclude them rather than grade them.
+function isUnsweepableHost(healthUrl) {
+  let host;
+  try { host = new URL(healthUrl).hostname; } catch { return true; }
+  // URL() keeps IPv6 literals bracketed; strip for comparison.
+  const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const h = bare.toLowerCase().replace(/\.$/, ""); // trailing dot is the same name
+
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+
+  // IPv6: loopback, unique-local (fc00::/7), link-local (fe80::/10),
+  // unspecified, and IPv4-mapped forms like ::ffff:127.0.0.1.
+  if (h.includes(":")) {
+    if (h === "::1" || h === "::") return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(h)) return true;
+    if (/^fe[89ab][0-9a-f]:/.test(h)) return true;
+    const mapped = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isUnsweepableHost(`http://${mapped[1]}/`);
+    return true; // any other raw IPv6 literal is not a registry endpoint
+  }
+
+  // A bare integer, hex, or octal host is an alternate encoding of an IPv4
+  // address (http://2130706433/ === http://127.0.0.1/). No legitimate registry
+  // endpoint is addressed this way, so refuse the whole class rather than
+  // trying to decode each form.
+  if (/^(0x[0-9a-f]+|\d+)$/.test(h)) return true;
+  if (/^0\d/.test(h)) return true;
+
+  if (/^127\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^0\./.test(h)) return true;
+  return false;
 }
 
 function pickHealthUrl(tool) {
@@ -958,6 +1271,16 @@ async function getAvailableCommands(env) {
 // MCP REGISTRY v0.1
 // ============================================
 
+// Best-effort ceiling on KV-stored MCP server registrations. See the POST
+// /v0.1/servers handler for the derivation and concurrency limits.
+const MCP_REGISTRY_MAX_KV_SERVERS = 100;
+
+/**
+ * Returns the built-in MCP server catalog entries that are always published.
+ *
+ * These seed records are merged with KV-backed registrations before public MCP
+ * registry and allowed-list responses are formatted.
+ */
 function getMcpServerSeed() {
   const now = "2026-03-03T00:00:00Z";
   return [

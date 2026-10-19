@@ -67,7 +67,9 @@ export class RedisService {
 
   async get(key: string): Promise<string | null> {
     try {
-      return await this.client.get(key);
+      // node-redis returns a branded BlobStringReply; normalise to a plain string.
+      const value = await this.client.get(key);
+      return value === null ? null : String(value);
     } catch (error) {
       logger.error('Redis GET failed', { error: error.message, key });
       throw error;
@@ -140,7 +142,9 @@ export class RedisService {
 
   async sismember(key: string, member: string): Promise<boolean> {
     try {
-      return await this.client.sIsMember(key, member);
+      // SISMEMBER replies 1/0, not a boolean. Returning it raw from a method
+      // declared `Promise<boolean>` broke any caller using a strict comparison.
+      return (await this.client.sIsMember(key, member)) === 1;
     } catch (error) {
       logger.error('Redis SISMEMBER failed', { error: error.message, key });
       throw error;
@@ -159,7 +163,8 @@ export class RedisService {
 
   async hget(key: string, field: string): Promise<string | undefined> {
     try {
-      return await this.client.hGet(key, field);
+      const value = await this.client.hGet(key, field);
+      return value === undefined || value === null ? null : String(value);
     } catch (error) {
       logger.error('Redis HGET failed', { error: error.message, key, field });
       throw error;
@@ -187,7 +192,8 @@ export class RedisService {
   // TTL operations
   async expire(key: string, seconds: number): Promise<boolean> {
     try {
-      return await this.client.expire(key, seconds);
+      // EXPIRE replies 1/0, not a boolean — same issue as sIsMember above.
+      return (await this.client.expire(key, seconds)) === 1;
     } catch (error) {
       logger.error('Redis EXPIRE failed', { error: error.message, key });
       throw error;

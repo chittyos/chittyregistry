@@ -279,4 +279,4 @@ export class AuthMiddleware {
   }
 }
 
-export { AuthenticatedRequest };
+export type { AuthenticatedRequest };

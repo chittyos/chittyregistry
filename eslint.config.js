@@ -19,7 +19,6 @@ export default [
       "**/*.d.ts",
       "jest.setup.ts",
       "src/**/*.test.ts",
-      "src/mcp-agent-*.ts",
       "src/registry-certificate-integration.js",
       "src/universal-registry-worker.js",
       "src/worker.js",

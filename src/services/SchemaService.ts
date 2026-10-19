@@ -1,7 +1,7 @@
 // ChittyOS Schema Authority Integration Service
 // Connects registry to schema.chitty.cc and canon.chitty.cc
 
-import fetch from 'node-fetch';
+// Node 20+ provides a global fetch; no node-fetch dependency needed.
 
 interface SchemaValidationResult {
   valid: boolean;
@@ -60,7 +60,9 @@ export class SchemaService {
       });
 
       if (response.ok) {
-        const services: CanonicalService[] = await response.json();
+        // Global fetch types json() as unknown; the canon endpoint's contract
+        // is an array of CanonicalService.
+        const services = (await response.json()) as CanonicalService[];
         services.forEach(service => {
           this.canonicalServices.set(service.id, service);
         });

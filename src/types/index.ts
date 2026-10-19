@@ -35,7 +35,7 @@ export const ServiceSchema = z.object({
   dependencies: z.array(z.string()).default([]),
   capabilities: z.array(z.string()).default([]),
   certificationLevel: z.enum(['BRONZE', 'SILVER', 'GOLD', 'PLATINUM']).optional(),
-  metadata: z.record(z.any()).default({})
+  metadata: z.record(z.string(), z.any()).default({})
 });
 
 export type Service = z.infer<typeof ServiceSchema>;
@@ -49,8 +49,8 @@ export const HealthStatusSchema = z.object({
   uptime: z.number().min(0),
   details: z.object({
     version: z.string().optional(),
-    dependencies: z.record(z.enum(['HEALTHY', 'UNHEALTHY'])).optional(),
-    metrics: z.record(z.number()).optional(),
+    dependencies: z.record(z.string(), z.enum(['HEALTHY', 'UNHEALTHY'])).optional(),
+    metrics: z.record(z.string(), z.number()).optional(),
     errors: z.array(z.string()).optional()
   }).optional()
 });

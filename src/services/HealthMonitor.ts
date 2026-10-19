@@ -32,10 +32,12 @@ export class HealthMonitor {
     const intervalSeconds = Math.max(30, Math.floor(this.config.interval / 1000));
     const cronExpression = `*/${intervalSeconds} * * * * *`;
 
-    this.cronJob = cron.schedule(cronExpression, async () => {
+    // node-cron v4 dropped the `scheduled` option: `schedule()` now starts the
+    // task immediately and `{ scheduled: false }` was being silently ignored,
+    // so the job began before the explicit start() below. createTask() builds
+    // it without starting, which is what this code always intended.
+    this.cronJob = cron.createTask(cronExpression, async () => {
       await this.performHealthChecks();
-    }, {
-      scheduled: false
     });
 
     this.cronJob.start();
@@ -115,14 +117,21 @@ export class HealthMonitor {
     // F-007: short-circuit self-check — CF Worker cannot fetch itself via public URL (loopback HTTP 522).
     // If this is the registry itself, return healthy directly (we are running, ergo we are healthy).
     if (service.serviceName === 'chittyregistry' || service.baseUrl?.includes('registry.chitty.cc')) {
+      // Previously built with `serviceName`/`lastChecked`/lowercase 'healthy' and
+      // no `uptime`, then forced through with `as HealthStatus`. The cast hid a
+      // shape mismatch: consumers reading `serviceId` got undefined and
+      // `status === 'HEALTHY'` was never true for the registry's own record.
       return {
-        serviceName: service.serviceName,
-        status: 'healthy',
+        serviceId: service.serviceName,
+        status: 'HEALTHY',
         responseTime: 0,
-        lastChecked: new Date().toISOString(),
-        statusCode: 200,
-        note: 'self-check short-circuited per F-007 / SOP-051',
-      } as HealthStatus;
+        lastCheck: new Date().toISOString(),
+        uptime: this.calculateUptime(service.serviceName, 'HEALTHY'),
+        details: {
+          version: service.version,
+          errors: [],
+        },
+      };
     }
 
     try {
@@ -161,7 +170,8 @@ export class HealthMonitor {
       // Parse health response if it's JSON
       let healthDetails: any = {};
       try {
-        if (response.headers['content-type']?.includes('application/json')) {
+        // Axios header values are string | number | boolean | string[].
+        if (String(response.headers['content-type'] ?? '').includes('application/json')) {
           healthDetails = response.data;
         }
       } catch (_parseError) {
@@ -323,7 +333,9 @@ export class HealthMonitor {
           },
           category: config.category,
           dependencies: [],
-          capabilities: config.capabilities
+          capabilities: config.capabilities,
+          // `metadata` is `.default({})`, so z.infer makes it required here.
+          metadata: {}
         };
 
         const health = await this.checkServiceHealth(service);
