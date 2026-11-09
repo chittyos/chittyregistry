@@ -186,3 +186,65 @@ Five sampled active ChittyRegister records returned `CERT-MOCK-*` certificate ID
 The primary Registry tools catalog does not contain four sampled active Register services (`chittymcp`, `chittyconnect`, `ch1tty`, `chittyrouter`).
 
 **Disposition:** HOLD / reconcile via Register -> Registry projection. Absence from one catalog is not proof the service is unregistered.
+
+
+## Recursive checkpoint 3 — cross-org duplicate-name tracing
+
+### Runtime-backed ownership evidence
+
+Cloudflare Workers Builds commit provenance was compared against candidate GitHub repositories:
+
+| Capability | Live Worker | Build commit provenance | Current classification |
+|---|---|---|---|
+| chittyledger | `chittyledger` | commit `be39cd29...` exists in `chittyfoundation/chittyledger`, not `chittyos/chittyledger` | Foundation repo = observed runtime source; ChittyOS repo = quarantine/supersede candidate |
+| chittychronicle | `chittychronicle` | commit `e6099bc7...` exists in `chittyos/chittychronicle`, not Foundation repo | ChittyOS repo = observed runtime source; Foundation repo = proposed/docs/historical candidate pending reconciliation |
+| chittysync | `chittysync` | commit `965b2810...` exists in `chittyos/chittysync`, not `chittyapps/chittysync` | ChittyOS repo = observed runtime source; Apps repo = supersede/retire candidate |
+
+### F-GLOBAL-012 — Placeholder CHARTERs can misidentify runtime owners
+
+`chittyos/chittyledger`, `chittyos/chittychronicle`, `chittyos/chittyscore`, `chittyos/chittyconcierge`, and `chittyos/chittyintel` expose generic placeholder CHARTERs using `chittycanon://core/services/canon`. This pattern is not reliable evidence of ownership.
+
+**Disposition:** QUARANTINE placeholder metadata claims; use runtime/build + Register/Canon evidence.
+
+### F-GLOBAL-013 — ChittyLedger duplicate has a runtime-backed owner
+
+- `chittyfoundation/chittyledger` contains the substantive ChittyLedger charter and matches the deployed Worker build commit lineage.
+- `chittyos/chittyledger` currently presents a placeholder charter with Canon's URI.
+
+**Provisional disposition:** KEEP Foundation implementation; SUPERSEDE/QUARANTINE ChittyOS duplicate after final consumer/reference scan. No repo deletion.
+
+### F-GLOBAL-014 — ChittyChronicle ownership is the reverse of its documentation quality
+
+- `chittyfoundation/chittychronicle` contains a detailed DRAFT charter.
+- The deployed `chittychronicle` Worker build lineage matches `chittyos/chittychronicle`.
+- Therefore the more complete Foundation document is not proof it owns the live implementation.
+
+**Disposition:** HOLD. Reconcile Foundation DRAFT as proposal/mirror versus ChittyOS runtime owner before any merge/retire action.
+
+### F-GLOBAL-015 — ChittySync Apps duplicate is likely stale
+
+- Deployed `chittysync` Worker build lineage matches `chittyos/chittysync`.
+- ChittyOS charter is v2.0.0 PENDING and describes the current multi-system synchronization role.
+- `chittyapps/chittysync` has a minimal v1.0 charter under a different domain (`chittysync.chitty.cc`).
+
+**Provisional disposition:** KEEP/PROJECT ChittyOS runtime; SUPERSEDE/RETIRE candidate for Apps repo after consumer scan.
+
+### F-GLOBAL-016 — Same-name does not always mean duplicate capability
+
+`chittyos/chittyscrape` is a general stateless browser/portal scraping service. `chittyapps/chittyscrape` is a TurboTenant-specific Apify automation gateway/actor. These are overlapping names but different jobs.
+
+**Disposition:** KEEP ChittyScrape service; PROJECT/MERGE candidate for TurboTenant actor under the canonical scrape/harvest capability after ownership review. Do not merge by repository name alone.
+
+### F-GLOBAL-017 — ChittyTrace collision is legal/evidence-sensitive
+
+`chittyapps/chittytrace` describes general evidence/litigation tracking; `chicagoapps/chittytrace` describes court-oriented financial forensics/exhibit generation.
+
+**Disposition:** LEGAL-ONLY / HOLD. Route to legal capability reconciliation; no generic retirement or data migration.
+
+### F-GLOBAL-018 — ChittyFractal Fabric has explicit archived/active split
+
+- `chittyfoundation/chittyfractal-fabric` is archived.
+- `chittyapps/chittyfractal-fabric` is active.
+- Both claim similarly named DRAFT orchestration capability/domain.
+
+**Provisional disposition:** Foundation repo = KEEP HISTORICAL / SUPERSEDED candidate; Apps repo = active implementation candidate. Verify Canon/Registry before promoting.
