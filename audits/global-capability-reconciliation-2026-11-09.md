@@ -248,3 +248,49 @@ Cloudflare Workers Builds commit provenance was compared against candidate GitHu
 - Both claim similarly named DRAFT orchestration capability/domain.
 
 **Provisional disposition:** Foundation repo = KEEP HISTORICAL / SUPERSEDED candidate; Apps repo = active implementation candidate. Verify Canon/Registry before promoting.
+
+
+## Recursive checkpoint 4 — ChatGPT, Library, machine and agent projections
+
+### ChatGPT-native
+- 106 Chitty-related skill surfaces are visible in the current runtime.
+- Same canonical names have non-identical instructions, including `nb-development-defaults`, `capability-governor`, `chittyos-compliance`, `chittycontext`, legal skills, and duplicate finance defaults.
+- ChittyMarket owns projection lifecycle and canonical skill definitions; issue chittyos/chittymarket#240 tracks reconciliation.
+- Only visible ChatGPT Space is `2024D007847`; classified **LEGAL-ONLY**, not inspected.
+- Current Project files: `ChittyAgent-Fabric.txt`, `GitHub Webhooks Overview.txt`, `memory-reconciliation-2026-11-06.md`.
+- Library contains separate ChittyOS/ANIMAS/Skills areas and legal/property domains. Legal/property folders are excluded from generic cleanup.
+
+### Safe Library mutation
+`ANIMAS_PROJECT_BOOTSTRAP.md` was moved intact to:
+`/ANIMAS: Plugins, Skills, Apps, Configs, CustomGPT/SUPERSEDED/ANIMAS_PROJECT_BOOTSTRAP.md`
+
+Basis:
+- the document self-identifies as discovery-first/noncanonical working guidance;
+- it assigns projection-management ownership to ANIMAS;
+- current ChittyMarket CHARTER explicitly owns capability projection definition/package/release/drift lifecycle.
+
+No content was deleted or rewritten.
+
+### Machine/runtime
+- chittyserv-vm: 193 Git repos discovered in scanned roots, 183 unique origins, 2 duplicate origins.
+- duplicate `chittycan`: current local-src clone clean at origin/main; normal checkout is two commits behind, no unique commits observed.
+- duplicate `chittyrental`: same HEAD, but both clones contain local modifications; active clone also has untracked files. **HOLD — no deletion.**
+- existing local `fleet-capability-drift.sh` is read-only/local-only and compares plugins/skills/agents, but not hooks/cron/config instructions.
+- chittymini-00 currently mounts `/Volumes/chitty` and `/Volumes/chitty-apfs`; historic `/Volumes/ChittyHD - Data` is absent.
+- four cron entries still target missing ChittyHD paths. Classify operationally stale-at-present but **HOLD** until replacement/migration history is resolved.
+- legal/evidence systemd timers on chittyserv are routed out of generic cleanup.
+
+### Agent projection inventory
+- 60 `chittyagents/*` directories vs 52 live `chittyagent-*` Cloudflare Workers.
+- provider-neutral Fabric definitions (`chief`, `gov`, `dev`, `audit`, `adversary`) intentionally have no Wrangler deployment.
+- Builder transition is already governed by PR #759 + draft #761; deployed incumbent remains `chittyagent-mcp-builder`.
+- KnowItAll is source-only/proposed; open PR #641 explicitly blocks deployment pending live resource roundtrip.
+- `command` source projects as `chittyagent-command-production`, creating naming drift rather than a second canonical agent.
+- `chittyagents/session/` contains only `skills-lock.json`; retirement/relocation candidate pending consumer scan.
+- chittyos/chittyentity#944 owns agent definition/runtime reconciliation.
+
+### Drive/Dropbox observations
+- Google Drive search across three connected accounts shows significant ChittyOS architecture/documentation history and multiple TY-VY-RY manuscript versions in the jeanarlene-connected account.
+- Drive artifacts are treated as document/history projections, not implementation authority.
+- Dropbox live search connector currently fails schema validation because the wrapper rejects its own required `link_id`; Dropbox is therefore **NOT OBSERVED via live search**, not empty.
+- Library mirror exposes Dropbox roots including DEVELOPMENT and AI CONFIGS & FILES, but those roots are not content-authoritative substitutes for a live Dropbox read.
