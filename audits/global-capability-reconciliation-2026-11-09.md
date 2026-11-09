@@ -143,3 +143,46 @@ Do not duplicate:
 **NOT COMPLETE.**
 
 This file is an observed-state checkpoint, not a canonical taxonomy or certification.
+
+
+## Recursive checkpoint 2 — live registration/catalog comparison
+
+Observed from `register.chitty.cc/api/v1/compliance/{service}` via authorized VM:
+
+| Service | ChittyRegister ID | Register status | Certificate observation |
+|---|---|---|---|
+| chittyregistry | `did:chitty:REG-XEAR7G` | active | `CERT-MOCK-*`, mock signature |
+| chittymcp | `did:chitty:REG-XEARK0` | active | `CERT-MOCK-*`, mock signature |
+| chittyconnect | `03-1-USA-1023-T-2602-0-41` | active | non-mock certificate record |
+| ch1tty | `did:chitty:REG-XEAL4T` | active | `CERT-MOCK-*`, mock signature |
+| chittygateway | `did:chitty:REG-XEASLS` | active | `CERT-MOCK-*`, mock signature |
+| chittyrouter | `did:chitty:REG-XE642M` | active | `CERT-MOCK-*`, mock signature |
+
+The top-level compliance records returned `entity_type: null`; certificate envelopes reported `entity_type: A`. This requires contract interpretation before any metadata normalization.
+
+Observed from live `registry.chitty.cc/api/v1/tools` (50 records total):
+- `chittygateway` exists only as a 2026-05-27 seed-shaped record with no `chitty_id`, no `entity_type`, object-shaped relative endpoints, and no certificate.
+- `chittyregistry` exists with `chitty_id: did:chitty:foundation:chittyregistry`, `entity_type: T`, and a self-anchored certificate reference.
+- `chittymcp`, `chittyconnect`, `ch1tty`, and `chittyrouter` were absent from this `/api/v1/tools` query.
+
+### F-GLOBAL-009 — Register/Registry identity divergence
+
+The registration authority and discoverable registry are not projecting the same service identities for the gateway spine.
+
+Example:
+- ChittyRegister: `chittyregistry = did:chitty:REG-XEAR7G`
+- ChittyRegistry catalog: `chittyregistry = did:chitty:foundation:chittyregistry`
+
+**Disposition:** HOLD. Reconcile authoritative identity lineage before updating repo frontmatter or Registry KV. Do not mint replacement identities.
+
+### F-GLOBAL-010 — Active mock compliance certificates
+
+Five sampled active ChittyRegister records returned `CERT-MOCK-*` certificate IDs and `mock-signature-*` signatures.
+
+**Disposition:** QUARANTINE as certification evidence. An `active` registration containing mock certificate material must not be treated as proof of production certification.
+
+### F-GLOBAL-011 — Gateway catalog incompleteness
+
+The primary Registry tools catalog does not contain four sampled active Register services (`chittymcp`, `chittyconnect`, `ch1tty`, `chittyrouter`).
+
+**Disposition:** HOLD / reconcile via Register -> Registry projection. Absence from one catalog is not proof the service is unregistered.
