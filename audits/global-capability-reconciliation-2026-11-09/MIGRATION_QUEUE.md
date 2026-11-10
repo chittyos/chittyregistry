@@ -72,3 +72,6 @@ No production authorization, route, identity, secret, evidence, finance, reposit
 | Establish target equivalent for `itcanbe-llc-site` + custom domains | Worker/domain migration | deployment + cert + hostname verification before cutover |
 | Cut registrar nameservers from Digital Dossier to ChittyCorp, if desired | production DNS authority | explicit approval + rollback receipt required |
 | Delete pending or old zone after migration decision | destructive cleanup | explicit approval; never automatic |
+
+| Repair ChittyTrust Cloudflare Builds deploy command | deployment pipeline | BLOCKED by #9/#11 authority/reporter conformance; do not redeploy prod first |
+| Add binding/environment readiness to ChittyTrust health contract | health/compliance | safe source PR after conformance design; production deploy remains gated |
