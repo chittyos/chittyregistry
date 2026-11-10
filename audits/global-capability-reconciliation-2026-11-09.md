@@ -355,11 +355,15 @@ Naming collision risk: Cloudflare “AI Audit” could be mistaken for ChittyOS 
 
 **Disposition:** PROJECT / external policy observer.
 
-### F-GLOBAL-020 — live AI Audit response differs from current API reference vocabulary
+### F-GLOBAL-020 — Cloudflare AI Audit reference omits a live Content-Signal field
 
-Current API reference documents content signals including `ai-input`, `ai-train`, and `search`. The sampled live response for `chitty.cc` / `ch1tty.com` contains `search`, `ai-train`, and `use: reference`.
+Current API reference documents `ai-input`, `ai-train`, and `search`. Direct live `robots.txt` inspection for both `chitty.cc` and `ch1tty.com` confirms Cloudflare Managed Content documents **four** signal concepts — `search`, `ai-input`, `ai-train`, and `use` — and currently emits:
 
-**Disposition:** HOLD provider-contract parsing. Do not hard-code one field set until direct robots/content-signal source and Cloudflare contract version are reconciled.
+`Content-Signal: search=yes,ai-train=no,use=reference`
+
+Therefore `use: reference` is a real zone policy directive, not an AI Audit parser artifact.
+
+**Disposition:** RESOLVED as provider-documentation drift. ChittyOS consumers must parse Content-Signal extensibly rather than hard-code only the API-reference field set. Absence of `ai-input` means no permission/restriction is expressed through that specific signal; do not infer yes/no.
 
 ### F-GLOBAL-021 — no ChittyOS code currently consumes AI Audit or the new Cloudflare AI discovery/ToMarkdown APIs
 
