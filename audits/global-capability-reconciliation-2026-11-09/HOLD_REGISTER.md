@@ -32,3 +32,6 @@ A HOLD is not an implied defect; it is an explicit refusal to guess.
 
 | `itcan.llc` duplicate Cloudflare zone | active authoritative zone is in Digital Dossier; ChittyCorp pending zone was manually created Nov 6, scanner-imported edge IPs, lacks Worker custom domains | explicit target-account decision + semantic DNS/Worker/policy migration plan | Cloudflare governance / #163 |
 | `itcanbe-llc-site` source ownership | live Worker exists only in Digital Dossier; no Workers Builds history or sampled GitHub source hit | canonical source/deployment provenance before any cross-account migration | Cloudflare governance / repository inventory |
+
+| ChittyTrust production deployment | production hostname runs default/development env; missing TRUST_CACHE/Hyperdrive/prod vars; evaluate 500 while health 200 | DRL conformance fixes + governed production deploy correction | chittyfoundation/chittytrust#12 / #9 / #11 |
+| Cloudflare resource-orphan classification | script settings endpoint under-represents env resources | use current deployed-version resource graph + source references before any delete | global reconciliation #235 |
