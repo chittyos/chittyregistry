@@ -56,3 +56,8 @@ No production authorization, route, identity, secret, evidence, finance, reposit
 | Reconcile AI Audit content-signal vocabulary (`ai-input` vs live `use`) | provider contract | no hard-coded enforcement until verified |
 | Evaluate Cloudflare AI model/schema discovery as runtime-adapter metadata source | provider capability | do not create canonical model registry clone |
 | Evaluate Cloudflare ToMarkdown as ingestion transform | provider utility | transformed Markdown remains derived material; provenance/source hash must remain upstream |
+
+| Evaluate dynamic Cloudflare model search/schema in runtime resolver instead of hard-coded availability assumptions | provider metadata | canonical routing/policy remains outside provider catalog |
+| Evaluate ToMarkdown as a noncanonical ingestion transform for low-risk source material | ingestion utility | source bytes/hash/provenance must remain authoritative; legal/evidence use separately governed |
+| Validate first authorized MemoryCloude persist provisions one per-P AI Search instance | memory conformance | chittyconnect#411; no backlog replay until canary passes |
+| Merge chittyentity#947 only after CI verifies deterministic seed/source alignment | source/runtime metadata | standard PR/deploy gate |
