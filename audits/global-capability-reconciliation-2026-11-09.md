@@ -294,3 +294,79 @@ No content was deleted or rewritten.
 - Drive artifacts are treated as document/history projections, not implementation authority.
 - Dropbox live search connector currently fails schema validation because the wrapper rejects its own required `link_id`; Dropbox is therefore **NOT OBSERVED via live search**, not empty.
 - Library mirror exposes Dropbox roots including DEVELOPMENT and AI CONFIGS & FILES, but those roots are not content-authoritative substitutes for a live Dropbox read.
+
+
+## Recursive checkpoint 5 — Cloudflare AI + AI Audit surfaces
+
+### Cloudflare AI API classification
+
+Current Cloudflare API exposes provider-level AI capabilities including:
+- model search: `GET /accounts/{account_id}/ai/models/search`
+- model input/output schema discovery: `GET /accounts/{account_id}/ai/models/schema`
+- file-to-Markdown transformation: `POST /accounts/{account_id}/ai/tomarkdown`
+- supported Markdown format discovery: `GET /accounts/{account_id}/ai/tomarkdown/supported`
+
+No references to these endpoints were found in sampled ChittyOS / ChittyFoundation / ChittyApps repositories.
+
+**Disposition:** PROJECT / provider capability. These are Cloudflare runtime/provider primitives and must not become a new ChittyOS canonical identity, evidence, memory, provenance, or authority service. If adopted, expose them through the appropriate provider/runtime adapter or existing ingestion/tool surface.
+
+### AI Audit classification
+
+Cloudflare AI Audit currently exposes:
+- `GET /zones/{zone_id}/ai-audit/robots`
+- `POST /zones/{zone_id}/ai-audit/robots/bulk`
+
+The response represents parsed robots/content-use policy such as:
+- allow/disallow paths
+- crawler/user-agent rules
+- content-use signals
+- crawl delay
+- sitemaps
+
+This is **not** model/agent behavioral auditing. It is an observed external content-use/crawler-policy surface.
+
+**ChittyOS role:** governance/input signal only. It may inform external-content handling policy, crawler behavior, indexing/admissibility rules, or site-governance checks. It does not replace ChittyAudit, ChittyDNA, ChittyLedger, ChittyGov, or ChittyAuth.
+
+### Live ChittyCorp observations
+
+AI Audit returned policy data for:
+- `chitty.cc`
+- `ch1tty.com`
+
+Both sampled zones currently report:
+- general crawl/search allowed
+- AI training disallowed
+- reference/use permitted in the live Cloudflare response
+- named AI crawlers such as GPTBot, ClaudeBot, Google-Extended, CCBot and others disallowed at `/`
+- no sitemaps in the sampled response
+
+AI Audit returned `not_found` for sampled:
+- `chittycorp.com`
+- `chittyfoundation.org`
+- `itschitty.com`
+- `distributedreputation.com`
+- `cloudette.cc`
+
+A 404 AI Audit result is classified as **NOT OBSERVED / no AI Audit policy result for that zone**, not as proof that the zone has no robots.txt or no AI policy.
+
+### F-GLOBAL-019 — Cloudflare AI Audit is a policy-observation projection, not ChittyAudit
+
+Naming collision risk: Cloudflare “AI Audit” could be mistaken for ChittyOS independent AI/agent audit. Its API is currently a robots/content-signal reader.
+
+**Disposition:** PROJECT / external policy observer.
+
+### F-GLOBAL-020 — live AI Audit response differs from current API reference vocabulary
+
+Current API reference documents content signals including `ai-input`, `ai-train`, and `search`. The sampled live response for `chitty.cc` / `ch1tty.com` contains `search`, `ai-train`, and `use: reference`.
+
+**Disposition:** HOLD provider-contract parsing. Do not hard-code one field set until direct robots/content-signal source and Cloudflare contract version are reconciled.
+
+### F-GLOBAL-021 — no ChittyOS code currently consumes AI Audit or the new Cloudflare AI discovery/ToMarkdown APIs
+
+Repository search across ChittyOS, ChittyFoundation, and ChittyApps found no current references to:
+- `ai-audit/robots`
+- `/ai/tomarkdown`
+- `/ai/models/search`
+- `/ai/models/schema`
+
+**Disposition:** new provider capability candidates only. Reuse existing canonical ingestion/provider-adapter/governance owners if adopted; do not create standalone ChittyAI-Audit or ChittyToMarkdown services by default.
