@@ -46,3 +46,13 @@
 3. Opened tracking issues only where an existing canonical owner/substream did not already cover the defect.
 
 No production authorization, route, identity, secret, evidence, finance, repository deletion, or service deletion has been performed.
+
+
+## P2 — Cloudflare AI provider surfaces
+
+| Work | Class | Mutation gate |
+|---|---|---|
+| Add read-only AI Audit policy inventory to Cloudflare governance/drift reporting | provider policy observation | safe only as read-only observation; no robots/policy mutation |
+| Reconcile AI Audit content-signal vocabulary (`ai-input` vs live `use`) | provider contract | no hard-coded enforcement until verified |
+| Evaluate Cloudflare AI model/schema discovery as runtime-adapter metadata source | provider capability | do not create canonical model registry clone |
+| Evaluate Cloudflare ToMarkdown as ingestion transform | provider utility | transformed Markdown remains derived material; provenance/source hash must remain upstream |
