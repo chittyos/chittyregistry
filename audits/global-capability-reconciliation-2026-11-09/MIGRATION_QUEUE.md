@@ -61,3 +61,14 @@ No production authorization, route, identity, secret, evidence, finance, reposit
 | Evaluate ToMarkdown as a noncanonical ingestion transform for low-risk source material | ingestion utility | source bytes/hash/provenance must remain authoritative; legal/evidence use separately governed |
 | Validate first authorized MemoryCloude persist provisions one per-P AI Search instance | memory conformance | chittyconnect#411; no backlog replay until canary passes |
 | Merge chittyentity#947 only after CI verifies deterministic seed/source alignment | source/runtime metadata | standard PR/deploy gate |
+
+
+## P0 — `itcan.llc` account migration guard
+
+| Work | Class | Mutation gate |
+|---|---|---|
+| Decide canonical Cloudflare account for `itcan.llc` | domain/account ownership | explicit governance/operator decision |
+| Replace scanner-imported pending DNS with source-semantic migration plan | DNS | no record writes until active-zone export/diff approved |
+| Establish target equivalent for `itcanbe-llc-site` + custom domains | Worker/domain migration | deployment + cert + hostname verification before cutover |
+| Cut registrar nameservers from Digital Dossier to ChittyCorp, if desired | production DNS authority | explicit approval + rollback receipt required |
+| Delete pending or old zone after migration decision | destructive cleanup | explicit approval; never automatic |
