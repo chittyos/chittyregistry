@@ -493,3 +493,58 @@ Do not activate, delete, or normalize this zone by inference.
 6. Verify Access/AI Audit/security/policy parity.
 7. Establish rollback: registrar nameservers remain reversible to the active Digital Dossier zone until target verification passes.
 8. Only then perform a nameserver cutover under explicit approval.
+
+
+## Recursive checkpoint 8 — deployed-version resource truth + ChittyTrust environment drift
+
+### Runtime-binding methodology correction
+
+Cloudflare Worker `/settings` responses were found to under-represent environment-scoped resources for at least `chittyagent-resolve`.
+
+Verification:
+- source Wrangler declares `RESOLVE_STATE` KV, `RESOLVE_DB` D1, `RESOLVE_AGENT` DO, and service binding.
+- script settings endpoint surfaced only a secret binding.
+- currently deployed version `a49e3476-8a2f-44a1-bb26-801586c0336d` contains the full expected resource set.
+
+**Audit rule correction:** deployed Worker **version resources** are the runtime binding source of truth. Do not retire a Cloudflare resource because it is absent from the script settings endpoint.
+
+A corrected deployed-version scan of all 116 current Workers confirms:
+- `chittyagent-resolve` uses D1 `0dd42471-76be-4294-af21-029b0f1225a2`.
+- `chittyconnect` uses legacy `TOKEN_KV`.
+- neither candidate MemoryCloude `MEMORY_KV` namespace is currently bound.
+
+### F-GLOBAL-024 — ChittyTrust production hostname is running the development/default environment
+
+Current source `chittyfoundation/chittytrust/wrangler.jsonc` places production resources under `env.production`, including:
+- `TRUST_CACHE` KV
+- Hyperdrive
+- production vars
+- production route
+- tail/observability resources
+
+Current production deployment:
+- deployment `bf4c98d0-6c4a-4005-bb2c-9e8042b42308`
+- version `5a523c0f-ebed-4858-ab13-bd6746e92f5e`
+- currently deployed version bindings contain only `CHITTYLEDGER_TOKEN`.
+
+Cloudflare Builds log for main build `ea0ff955-9414-4c09-8182-a0438fa004b6` explicitly shows:
+`Executing user deploy command: npx wrangler deploy`
+followed by Wrangler's warning that multiple environments exist but no target environment was specified.
+
+Live read-only canary:
+- `/health` = HTTP 200 / status ok
+- `/api/v1/status` = HTTP 200 but `environment:"development"`
+- `/v1/evaluate` = HTTP 500 because `TRUST_CACHE` is undefined
+
+**Disposition:** QUARANTINE current production trust execution as deployment-nonconformant. Tracked by chittyfoundation/chittytrust#12.
+
+Do **not** fix by immediately deploying `--env production`: restoring `TRUST_CACHE` would also restore the unauthenticated reporter-write path already blocked by DRL conformance #9/#11.
+
+### F-GLOBAL-025 — ChittyTrust health endpoint is false-green
+
+`/health` reports healthy while:
+- production hostname identifies itself as development,
+- required resource binding is absent,
+- read-only evaluation throws 500.
+
+**Disposition:** health contract must include environment/resource readiness before certification or routing can rely on it.
