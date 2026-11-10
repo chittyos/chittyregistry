@@ -29,3 +29,6 @@ A HOLD is not an implied defect; it is an explicit refusal to guess.
 
 | AI Audit coverage across Chitty zones | only chitty.cc/ch1tty.com returned AI Audit data in sampled set; others returned not_found | zone-by-zone policy inventory and domain owner intent | Cloudflare governance |
 | Cloudflare AI model/schema/ToMarkdown adoption | no current ChittyOS consumers found | identify canonical adapter/ingestion owner before adoption | ChittyAgent Fabric / ChittyMarket / ingestion owner |
+
+| `itcan.llc` duplicate Cloudflare zone | active authoritative zone is in Digital Dossier; ChittyCorp pending zone was manually created Nov 6, scanner-imported edge IPs, lacks Worker custom domains | explicit target-account decision + semantic DNS/Worker/policy migration plan | Cloudflare governance / #163 |
+| `itcanbe-llc-site` source ownership | live Worker exists only in Digital Dossier; no Workers Builds history or sampled GitHub source hit | canonical source/deployment provenance before any cross-account migration | Cloudflare governance / repository inventory |
