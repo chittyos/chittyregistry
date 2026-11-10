@@ -429,3 +429,67 @@ Read-only API currently returns:
 **ChittyOS disposition:**
 - Model search/schema = provider capability metadata for runtime adapters/resolvers. Do not copy it into a competing canonical model registry.
 - ToMarkdown = provider transform utility. Output is derivative material and must retain source/provenance linkage; it does not replace ChittyStorage, ChittyDNA, legal evidence extraction rules, or native artifact tooling.
+
+
+## Recursive checkpoint 7 — duplicate `itcan.llc` Cloudflare zone
+
+Full ChittyCorp-visible zone inventory currently contains 71 zones and one duplicate zone name: `itcan.llc`.
+
+### Authoritative active zone
+
+- zone id: `1c87458cb3493b53fabcbd4fa9e45ae0`
+- account: **Digital Dossier** (`84f0f32886f1d6196380fe6cbe9656a8`)
+- status: active
+- created: 2024-12-03
+- activated: 2024-12-04
+- authoritative Cloudflare nameservers: `addilyn.ns.cloudflare.com`, `quincy.ns.cloudflare.com`
+- registrar observed: Spaceship
+- 22 DNS records
+- account-scoped Worker custom domains:
+  - `itcan.llc` -> `itcanbe-llc-site`
+  - `www.itcan.llc` -> `itcanbe-llc-site`
+- Worker `itcanbe-llc-site` exists in Digital Dossier; no Workers Builds history was returned for it and no GitHub source reference was found in the sampled global code search.
+
+### Pending ChittyCorp zone
+
+- zone id: `568e1b88cf04efe9d2e0549c22b994b9`
+- account: **ChittyCorp LLC** (`0bc21e3a5a9de1a4cc843be9c3e98121`)
+- status: pending
+- created: 2026-11-06 15:59:43Z
+- new nameservers: `ken.ns.cloudflare.com`, `melany.ns.cloudflare.com`
+- `original_name_servers`: `quincy.ns.cloudflare.com`, `addilyn.ns.cloudflare.com` — the current Digital Dossier authority
+- 24 DNS records
+- no Worker routes
+- no Page Rules
+- no Worker custom-domain bindings in ChittyCorp for `itcan.llc`
+
+Audit Logs v2 confirms the ChittyCorp zone was manually created through the Cloudflare dashboard on 2026-11-06 15:59:42Z, immediately followed by DNS scan/import and a free-plan subscription.
+
+No contemporaneous project/governance record was found that establishes an approved cross-account zone migration. Existing November 6 reconciliation context was read-only and explicitly avoided migration/deletion/creation as an inferred cleanup step.
+
+### F-GLOBAL-023 — `itcan.llc` pending zone is an unfinished migration artifact, not an activation-ready duplicate
+
+The pending zone's DNS scan resolved currently proxied/managed hostnames and imported Cloudflare edge A/AAAA addresses. Examples include apex/www and service hostnames. This is not equivalent to the active zone's source-of-truth DNS semantics.
+
+The active zone also owns Worker custom-domain mappings to `itcanbe-llc-site`; the pending zone has none.
+
+Changing registrar nameservers to the pending ChittyCorp zone in its current state would risk:
+- breaking the existing Worker-served website,
+- replacing source CNAME/managed records with scanned edge IP representations,
+- creating Cloudflare-to-Cloudflare origin/routing ambiguity,
+- changing account-level policy/certificate/AI Audit state without a governed migration receipt.
+
+**Disposition:** QUARANTINE / HOLD as unfinished cross-account migration artifact.
+
+Do not activate, delete, or normalize this zone by inference.
+
+### Required migration proof before any zone move
+
+1. Establish intended canonical Cloudflare account for IT CAN BE LLC / `itcan.llc`.
+2. Export and semantically diff active DNS vs target DNS; do not trust scanner output as migration source.
+3. Recreate/transfer `itcanbe-llc-site` deployment in the target account or otherwise establish equivalent target origin.
+4. Recreate Worker custom domains and applicable certificates/settings in target account.
+5. Validate email/DKIM/DMARC/SRV/Microsoft/Google records from source, not resolved edge IPs.
+6. Verify Access/AI Audit/security/policy parity.
+7. Establish rollback: registrar nameservers remain reversible to the active Digital Dossier zone until target verification passes.
+8. Only then perform a nameserver cutover under explicit approval.
