@@ -27,6 +27,5 @@
 
 A HOLD is not an implied defect; it is an explicit refusal to guess.
 
-| Cloudflare AI Audit parser contract | live response uses `use: reference`; current API reference documents `ai-input`/AI-train/search | direct robots/content-signal source + provider contract/version interpretation | Cloudflare governance / #163 |
 | AI Audit coverage across Chitty zones | only chitty.cc/ch1tty.com returned AI Audit data in sampled set; others returned not_found | zone-by-zone policy inventory and domain owner intent | Cloudflare governance |
 | Cloudflare AI model/schema/ToMarkdown adoption | no current ChittyOS consumers found | identify canonical adapter/ingestion owner before adoption | ChittyAgent Fabric / ChittyMarket / ingestion owner |
