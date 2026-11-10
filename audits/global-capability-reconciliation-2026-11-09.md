@@ -370,3 +370,58 @@ Repository search across ChittyOS, ChittyFoundation, and ChittyApps found no cur
 - `/ai/models/schema`
 
 **Disposition:** new provider capability candidates only. Reuse existing canonical ingestion/provider-adapter/governance owners if adopted; do not create standalone ChittyAI-Audit or ChittyToMarkdown services by default.
+
+
+## Recursive checkpoint 6 — Cloudflare AI estate projection map
+
+### AI Gateway live inventory
+
+Observed gateways in ChittyCorp account:
+- `central`
+- `chittycounsel`
+- `default`
+- `finance`
+
+Observed activity metadata:
+- `central`: 560 logs; latest observed 2026-11-08.
+- `chittycounsel`: 98,997 logs; latest observed 2026-08-18.
+- `default`: 9 logs; latest observed 2026-08-09.
+- `finance`: 33 logs; latest observed 2026-09-18.
+
+No request/response bodies were inspected.
+
+Source documentation and `agent-core/src/ai-gateway.ts` identify `central` as the canonical general model-routing gateway. Domain gateways remain provider-side projections; activity count alone does not authorize retirement.
+
+### F-GLOBAL-022 — live ChittyAgent UI advertised a retired AI Gateway
+
+`chittyagents/ui/wrangler.jsonc` declared `AI_GATEWAY=chittygateway`, and production `https://agent.chitty.cc/health` returned `gateway:"chittygateway"`.
+
+The live account no longer contains a `chittygateway` AI Gateway. Current canonical general router is `central`.
+
+**Safe source correction opened:** chittyos/chittyentity#947
+- source var -> `central`
+- deterministic binding seed mirror -> `central`
+- no model-execution-path change; fixes active metadata/config drift.
+
+### AI Search live inventory
+
+Namespaces:
+- `default` — 0 instances
+- `finance` — 1 enabled instance; gateway `finance`; Qwen3 embedding; engine v3; hybrid search + cache enabled
+- `memory` — 0 instances
+- `legal` — 1 enabled instance; gateway `chittycounsel`; Qwen3 embedding; engine v3; hybrid search + cache enabled
+
+The `memory` namespace description declares one authorized instance per Canon Synthetic Person. ChittyConnect MemoryCloude code implements lazy `namespace.get()/create({id})` provisioning on the first authorized persist.
+
+**Interpretation:** zero memory instances is not an architecture contradiction by itself. It means no per-P AI Search instance presently exists. Combined with the existing canonical-memory write outage, this is a direct readiness/canary condition under the existing MemoryCloude work item, not a reason to invent a replacement store.
+
+### Cloudflare AI provider catalog
+
+Read-only API currently returns:
+- 73 Workers AI models in model search.
+- model schema API exists for machine-readable input/output contracts.
+- ToMarkdown supports 28 observed formats including PDF, common images, HTML/XML, spreadsheets, DOCX/ODT, PPTX and OpenDocument presentations.
+
+**ChittyOS disposition:**
+- Model search/schema = provider capability metadata for runtime adapters/resolvers. Do not copy it into a competing canonical model registry.
+- ToMarkdown = provider transform utility. Output is derivative material and must retain source/provenance linkage; it does not replace ChittyStorage, ChittyDNA, legal evidence extraction rules, or native artifact tooling.
